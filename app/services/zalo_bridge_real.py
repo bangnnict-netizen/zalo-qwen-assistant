@@ -16,6 +16,8 @@ from app.repositories.supabase_repo import SupabaseRepo
 from app.services.message_pipeline import MessagePipeline
 from app.services.zalo_bridge import ZaloBridge
 
+from app.services import zlapi_patch  # noqa: F401 — patch zlapi before use
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_USER_AGENT = (
@@ -23,6 +25,7 @@ DEFAULT_USER_AGENT = (
     "(KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
 RECONNECT_BACKOFFS = (30, 60, 120)
+PERSIST_RETRY_INTERVAL_SEC = 60
 QR_PATH = Path("data/zalo_qr.png")
 
 
@@ -59,6 +62,8 @@ class RealZaloBridge(ZaloBridge):
         self._reconnect_attempt = 0
         self._started = False
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._persist_retry_thread: threading.Thread | None = None
+        self._persist_retry_stop = threading.Event()
 
     @property
     def status(self) -> str:
@@ -102,6 +107,10 @@ class RealZaloBridge(ZaloBridge):
 
     def get_status(self) -> dict[str, str]:
         return {"status": self._status}
+
+    def persist_session_now(self) -> bool:
+        """Force-save the current Zalo session to Supabase."""
+        return self._persist_session()
 
     def render_qr_html(self, poll_url: str) -> str:
         qr_src = (
@@ -147,6 +156,7 @@ class RealZaloBridge(ZaloBridge):
 </html>"""
 
     def _default_client_factory(self, **kwargs: Any) -> Any:
+        from app.services import zlapi_patch  # noqa: F401
         from zlapi import ZaloAPI
 
         return ZaloAPI(
@@ -232,15 +242,43 @@ class RealZaloBridge(ZaloBridge):
         self._login_thread = threading.Thread(target=_run, daemon=True, name="zalo-qr-login")
         self._login_thread.start()
 
-    def _persist_session(self) -> None:
+    def _persist_session(self) -> bool:
         if self._client is None:
-            return
+            return False
         payload = {
             "cookies": self._client.getSession(),
             "imei": getattr(self._client, "_imei", None),
             "user_agent": DEFAULT_USER_AGENT,
         }
-        self.repo.save_session(payload)
+        try:
+            self.repo.save_session(payload)
+            self._persist_retry_stop.set()
+            logger.info("Zalo session persisted to Supabase")
+            return True
+        except Exception as exc:
+            logger.warning("Session persist failed: %s", exc)
+            self._ensure_persist_retry_running()
+            return False
+
+    def _ensure_persist_retry_running(self) -> None:
+        if self._persist_retry_thread and self._persist_retry_thread.is_alive():
+            return
+        self._persist_retry_stop.clear()
+
+        def _retry_loop() -> None:
+            while not self._persist_retry_stop.wait(PERSIST_RETRY_INTERVAL_SEC):
+                if self._client is None or self._status != "connected":
+                    return
+                if self._persist_session():
+                    return
+                logger.warning("Session persist retry failed, next in 60s")
+
+        self._persist_retry_thread = threading.Thread(
+            target=_retry_loop,
+            daemon=True,
+            name="zalo-persist-retry",
+        )
+        self._persist_retry_thread.start()
 
     def _bind_message_handler(self) -> None:
         if self._client is None:

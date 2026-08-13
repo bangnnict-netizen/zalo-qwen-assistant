@@ -106,6 +106,18 @@ async def zalo_status(x_admin_token: str | None = Header(default=None)) -> dict[
     return {"status": "mock"}
 
 
+@app.post("/zalo/persist-session")
+async def zalo_persist_session(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, bool]:
+    """Force-save the current Zalo session to Supabase."""
+    _require_admin_token(x_admin_token)
+    if not isinstance(zalo_bridge, RealZaloBridge):
+        raise HTTPException(status_code=404, detail="Real Zalo bridge disabled")
+    saved = zalo_bridge.persist_session_now()
+    return {"saved": saved}
+
+
 @app.get("/zalo/qrpage", response_class=HTMLResponse)
 async def zalo_qrpage(token: str = Query(default="")) -> HTMLResponse:
     """Simple QR login page with 5-second status polling."""

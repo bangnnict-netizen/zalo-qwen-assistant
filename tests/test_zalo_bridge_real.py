@@ -111,8 +111,49 @@ def test_save_session_after_restore_success() -> None:
     )
 
     assert bridge._try_restore_session(repo.load_session.return_value) is True
-    bridge._persist_session()
+    assert bridge.persist_session_now() is True
     repo.save_session.assert_called_once()
+
+
+def test_persist_session_starts_retry_on_failure() -> None:
+    repo = MagicMock(spec=SupabaseRepo)
+    repo.save_session.side_effect = RuntimeError("db down")
+    sleeps: list[float] = []
+
+    bridge = RealZaloBridge(
+        repo=repo,
+        settings=_settings(),
+        sleep=sleeps.append,
+    )
+    bridge._client = MagicMock()
+    bridge._client.getSession.return_value = {"z": "1"}
+    bridge._client._imei = "imei-1"
+    bridge._status = "connected"
+
+    assert bridge.persist_session_now() is False
+    assert bridge._persist_retry_thread is not None
+    assert bridge._persist_retry_thread.is_alive()
+    bridge._persist_retry_stop.set()
+    bridge._persist_retry_thread.join(timeout=2)
+
+
+def test_persist_session_retry_succeeds() -> None:
+    repo = MagicMock(spec=SupabaseRepo)
+    repo.save_session.side_effect = [RuntimeError("db down"), None]
+    bridge = RealZaloBridge(
+        repo=repo,
+        settings=_settings(),
+        sleep=lambda _s: None,
+    )
+    bridge._client = MagicMock()
+    bridge._client.getSession.return_value = {"z": "1"}
+    bridge._client._imei = "imei-1"
+    bridge._status = "connected"
+    bridge._persist_retry_stop.set()
+
+    assert bridge._persist_session() is False
+    assert bridge._persist_session() is True
+    assert repo.save_session.call_count == 2
 
 
 def test_backoff_reconnect_moves_to_awaiting_qr_when_session_dead() -> None:
