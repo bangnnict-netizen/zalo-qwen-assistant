@@ -239,6 +239,7 @@ class SupabaseRepo:
         return self._list_bindings_from_session_cache()
 
     def upsert_binding(self, group_id: str, name: str, group_type: str) -> None:
+        group_id = str(group_id).strip()
         if group_type not in ("internal", "customer"):
             raise ValueError("group_type must be internal or customer")
         self.ensure_group_bindings_table()
@@ -259,6 +260,7 @@ class SupabaseRepo:
         )
 
     def delete_binding(self, group_id: str) -> None:
+        group_id = str(group_id).strip()
         if self._group_bindings_table_exists():
             self.client.table("group_bindings").delete().eq("group_id", group_id).execute()
             return

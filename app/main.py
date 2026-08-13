@@ -8,7 +8,7 @@ from typing import Literal
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.config import get_settings
 from app.repositories.supabase_repo import SupabaseRepo
@@ -78,6 +78,13 @@ class BindGroupRequest(BaseModel):
     group_id: str = Field(..., min_length=1)
     name: str = ""
     group_type: Literal["internal", "customer"] | None = None
+
+    @field_validator("group_id", mode="before")
+    @classmethod
+    def coerce_group_id_to_str(cls, value: object) -> str:
+        if value is None:
+            raise ValueError("group_id is required")
+        return str(value).strip()
 
 
 @app.get("/health")

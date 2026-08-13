@@ -41,6 +41,7 @@ class GroupBindingRegistry:
             self._supabase_bindings = {}
 
     def resolve_group_type(self, group_id: str) -> str | None:
+        group_id = str(group_id)
         if group_id in self.settings.allowed_internal_group_ids:
             return "internal"
         if group_id in self.settings.allowed_customer_group_ids:
