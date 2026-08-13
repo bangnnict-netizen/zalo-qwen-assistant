@@ -20,7 +20,7 @@ def _settings() -> Settings:
     return Settings(
         groq_api_key="test-key",
         admin_token="secret-admin",
-        bot_tag="@QwenAssist",
+        bot_tags=["@Byron", "@bot"],
         allowed_internal_group_ids=[],
         allowed_customer_group_ids=[],
     )
@@ -80,7 +80,7 @@ async def test_bind_internal_simulate_uses_internal_persona(
         {
             "group_id": "7417141469033973442",
             "sender_gender": "male",
-            "text": "@QwenAssist mấy giờ nhà máy nghỉ làm?",
+            "text": "@Byron mấy giờ nhà máy nghỉ làm?",
         }
     )
 
@@ -106,7 +106,7 @@ async def test_unbind_group_pipeline_returns_none(
         {
             "group_id": "7417141469033973442",
             "sender_gender": "male",
-            "text": "@QwenAssist mấy giờ nhà máy nghỉ làm?",
+            "text": "@Byron mấy giờ nhà máy nghỉ làm?",
         }
     )
 
@@ -139,7 +139,7 @@ def test_simulate_endpoint_replied_false_after_unbind(
             json={
                 "group_id": "7417141469033973442",
                 "sender_gender": "male",
-                "text": "@QwenAssist mấy giờ nhà máy nghỉ làm?",
+                "text": "@Byron mấy giờ nhà máy nghỉ làm?",
             },
         )
 
@@ -177,7 +177,7 @@ def test_simulate_endpoint_replied_true_after_bind_internal(
             json={
                 "group_id": "7417141469033973442",
                 "sender_gender": "male",
-                "text": "@QwenAssist mấy giờ nhà máy nghỉ làm?",
+                "text": "@Byron mấy giờ nhà máy nghỉ làm?",
             },
         )
 
@@ -213,7 +213,7 @@ def test_undeclared_group_is_not_logged() -> None:
         handler(
             "mid",
             "user1",
-            "@QwenAssist hello",
+            "@Byron hello",
             MagicMock(dName="Anh Bằng"),
             "9999999999999999999",
             FakeThreadType.GROUP,

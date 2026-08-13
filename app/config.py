@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     llm_primary_model: str = "qwen/qwen3.6-27b"
     llm_fallback_model: str = "openai/gpt-oss-20b"
-    bot_tag: str = "@QwenAssist"
+    bot_tags: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["@Byron", "@bot"]
+    )
     supabase_url: str = ""
     supabase_key: str = ""
     supabase_db_url: str = ""
@@ -54,6 +56,7 @@ class Settings(BaseSettings):
     zalo_max_delay_sec: int = 6
 
     @field_validator(
+        "bot_tags",
         "allowed_internal_group_ids",
         "allowed_customer_group_ids",
         "admin_user_ids",

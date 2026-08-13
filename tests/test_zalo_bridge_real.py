@@ -21,7 +21,7 @@ class FakeThreadType:
 def _settings() -> Settings:
     return Settings(
         groq_api_key="test",
-        bot_tag="@QwenAssist",
+        bot_tags=["@Byron", "@bot"],
         allowed_internal_group_ids=["group_internal_demo"],
         allowed_customer_group_ids=["group_customer_demo"],
     )
@@ -81,7 +81,7 @@ async def test_group_messages_are_logged() -> None:
         handler(
             "mid",
             "user1",
-            "@QwenAssist giờ nghỉ?",
+            "@Byron giờ nghỉ?",
             MagicMock(dName="Anh Bằng"),
             "group_internal_demo",
             FakeThreadType.GROUP,
@@ -106,7 +106,7 @@ async def test_undeclared_group_messages_are_silent() -> None:
         handler(
             "mid",
             "user1",
-            "@QwenAssist giờ nghỉ?",
+            "@Byron giờ nghỉ?",
             MagicMock(dName="Anh Bằng"),
             "unknown_group",
             1,

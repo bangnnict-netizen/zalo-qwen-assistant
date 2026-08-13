@@ -15,7 +15,7 @@ from app.services.router_service import MessageRouter
 def _settings() -> Settings:
     return Settings(
         groq_api_key="test-key",
-        bot_tag="@QwenAssist",
+        bot_tags=["@Byron", "@bot"],
         allowed_internal_group_ids=["group_internal_demo"],
         allowed_customer_group_ids=["group_customer_demo"],
     )
@@ -23,6 +23,16 @@ def _settings() -> Settings:
 
 def _run(coro):
     return asyncio.run(coro)
+
+
+def _mock_router() -> AsyncMock:
+    router = AsyncMock(spec=MessageRouter)
+    router.route.return_value = {
+        "answer": "ok",
+        "model_used": "test-model",
+        "sources": [],
+    }
+    return router
 
 
 @pytest.mark.asyncio
@@ -43,6 +53,23 @@ async def test_no_bot_tag_returns_none() -> None:
 
 
 @pytest.mark.asyncio
+async def test_con_bot_not_a_tag_returns_none() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_internal_demo",
+            "sender_gender": "male",
+            "text": "con bot chạy nhanh",
+        }
+    )
+
+    assert result is None
+    router.route.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_unknown_group_returns_none() -> None:
     router = AsyncMock(spec=MessageRouter)
     pipeline = MessagePipeline(router=router, settings=_settings())
@@ -51,12 +78,96 @@ async def test_unknown_group_returns_none() -> None:
         {
             "group_id": "group_unknown",
             "sender_gender": "male",
-            "text": "@QwenAssist xin chào",
+            "text": "@Byron xin chào",
         }
     )
 
     assert result is None
     router.route.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_byron_tag_replies() -> None:
+    router = _mock_router()
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_internal_demo",
+            "sender_gender": "male",
+            "text": "@Byron mấy giờ?",
+        }
+    )
+
+    assert result is not None
+    router.route.assert_awaited_once_with(
+        group_type="internal",
+        question="mấy giờ?",
+        honorific="anh",
+    )
+
+
+@pytest.mark.asyncio
+async def test_bot_tag_replies() -> None:
+    router = _mock_router()
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_internal_demo",
+            "sender_gender": "male",
+            "text": "@bot mấy giờ?",
+        }
+    )
+
+    assert result is not None
+    router.route.assert_awaited_once_with(
+        group_type="internal",
+        question="mấy giờ?",
+        honorific="anh",
+    )
+
+
+@pytest.mark.asyncio
+async def test_bot_tag_case_insensitive() -> None:
+    router = _mock_router()
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_internal_demo",
+            "sender_gender": "male",
+            "text": "@BOT mấy giờ?",
+        }
+    )
+
+    assert result is not None
+    router.route.assert_awaited_once_with(
+        group_type="internal",
+        question="mấy giờ?",
+        honorific="anh",
+    )
+
+
+@pytest.mark.asyncio
+async def test_both_tags_stripped() -> None:
+    router = _mock_router()
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_internal_demo",
+            "sender_gender": "male",
+            "text": "@Byron @bot cả hai",
+        }
+    )
+
+    assert result is not None
+    router.route.assert_awaited_once_with(
+        group_type="internal",
+        question="cả hai",
+        honorific="anh",
+    )
 
 
 @pytest.mark.asyncio
@@ -73,7 +184,7 @@ async def test_internal_male_uses_anh_honorific() -> None:
         {
             "group_id": "group_internal_demo",
             "sender_gender": "male",
-            "text": "@QwenAssist mấy giờ nhà máy nghỉ làm?",
+            "text": "@Byron mấy giờ nhà máy nghỉ làm?",
         }
     )
 
@@ -100,7 +211,7 @@ async def test_customer_female_uses_chi_honorific() -> None:
         {
             "group_id": "group_customer_demo",
             "sender_gender": "female",
-            "text": "@QwenAssist gửi hàng chiếu xạ mất bao lâu?",
+            "text": "@bot gửi hàng chiếu xạ mất bao lâu?",
         }
     )
 

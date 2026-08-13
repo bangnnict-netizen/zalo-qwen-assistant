@@ -50,7 +50,7 @@ def test_log_message_inserts_row() -> None:
             sender_id="u1",
             sender_name="Anh Bằng",
             gender="male",
-            text="@QwenAssist xin chào",
+            text="@Byron xin chào",
         )
 
     table.insert.assert_called_once_with(
@@ -59,7 +59,7 @@ def test_log_message_inserts_row() -> None:
             "sender_id": "u1",
             "sender_name": "Anh Bằng",
             "gender": "male",
-            "text": "@QwenAssist xin chào",
+                "text": "@Byron xin chào",
         }
     )
 
