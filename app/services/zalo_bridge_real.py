@@ -127,6 +127,72 @@ class RealZaloBridge(ZaloBridge):
         self._start_qr_login()
         return True
 
+    def list_groups(self) -> list[dict[str, str]]:
+        """Return Zalo groups the connected account has joined."""
+        if self._client is None or self._status != "connected":
+            raise RuntimeError("Zalo client is not connected")
+
+        raw = self._client.fetchAllGroups()
+        group_ids = self._extract_group_ids(raw)
+        if not group_ids:
+            return []
+
+        names = self._fetch_group_names(group_ids)
+        return [{"group_id": gid, "name": names.get(gid, gid)} for gid in group_ids]
+
+    @staticmethod
+    def _extract_group_ids(raw: Any) -> list[str]:
+        ids: list[str] = []
+
+        def add(value: object) -> None:
+            text = str(value).strip()
+            if not text or not text.isdigit():
+                return
+            if text not in ids:
+                ids.append(text)
+
+        for attr in ("gridVerMap", "gridInfoMap"):
+            data = getattr(raw, attr, None)
+            if isinstance(data, dict):
+                for key in data:
+                    add(key)
+
+        return ids
+
+    def _fetch_group_names(self, group_ids: list[str]) -> dict[str, str]:
+        names: dict[str, str] = {}
+        try:
+            info = (
+                self._client.fetchGroupInfo(group_ids[0])
+                if len(group_ids) == 1
+                else self._client.fetchGroupInfo({gid: 0 for gid in group_ids})
+            )
+            info_map = getattr(info, "gridInfoMap", None) or {}
+            for gid, detail in dict(info_map).items():
+                if isinstance(detail, dict):
+                    label = detail.get("name") or detail.get("gName") or detail.get("groupName")
+                else:
+                    label = (
+                        getattr(detail, "name", None)
+                        or getattr(detail, "gName", None)
+                        or getattr(detail, "groupName", None)
+                    )
+                if label:
+                    names[str(gid)] = str(label)
+        except Exception:
+            logger.warning("Could not fetch Zalo group names", exc_info=True)
+        return names
+
+    @staticmethod
+    def _is_group_thread(thread_type: Any) -> bool:
+        from zlapi.models import ThreadType
+
+        if thread_type == ThreadType.GROUP:
+            return True
+        if thread_type == 1:
+            return True
+        return getattr(thread_type, "value", None) == ThreadType.GROUP.value
+
     def render_qr_html(self, poll_url: str) -> str:
         qr_src = (
             f"data:image/png;base64,{self._qr_image_b64}"
@@ -327,9 +393,7 @@ class RealZaloBridge(ZaloBridge):
             thread_id,
             thread_type,
         ) -> None:
-            from zlapi.models import ThreadType
-
-            if thread_type == ThreadType.USER:
+            if not bridge._is_group_thread(thread_type):
                 return
 
             text = message if isinstance(message, str) else str(message or "")

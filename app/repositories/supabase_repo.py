@@ -175,6 +175,19 @@ class SupabaseRepo:
             }
         ).execute()
 
+    def recent_logs(self, limit: int = 20) -> list[dict[str, Any]]:
+        if not self._tables_exist():
+            return []
+        capped = max(1, min(limit, 100))
+        result = (
+            self.client.table("message_logs")
+            .select("group_id,sender_name,text,created_at")
+            .order("created_at", desc=True)
+            .limit(capped)
+            .execute()
+        )
+        return result.data or []
+
     def delete_old_messages(self, older_than_days: int | None = None) -> int:
         days = older_than_days if older_than_days is not None else self.settings.ttl_days
         if not self._tables_exist():

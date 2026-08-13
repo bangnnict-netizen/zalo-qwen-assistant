@@ -130,6 +130,28 @@ async def zalo_refresh_qr(
     return {"status": "awaiting_qr" if started else zalo_bridge.status}
 
 
+@app.get("/zalo/groups")
+async def zalo_groups(x_admin_token: str | None = Header(default=None)) -> list[dict[str, str]]:
+    """List Zalo groups joined by the connected account."""
+    _require_admin_token(x_admin_token)
+    if not isinstance(zalo_bridge, RealZaloBridge):
+        raise HTTPException(status_code=404, detail="Real Zalo bridge disabled")
+    try:
+        return zalo_bridge.list_groups()
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+
+@app.get("/zalo/recent-logs")
+async def zalo_recent_logs(
+    limit: int = Query(default=20, ge=1, le=100),
+    x_admin_token: str | None = Header(default=None),
+) -> list[dict[str, object]]:
+    """Return latest rows from message_logs for debugging inbound traffic."""
+    _require_admin_token(x_admin_token)
+    return supabase_repo.recent_logs(limit=limit)
+
+
 @app.get("/zalo/qrpage", response_class=HTMLResponse)
 async def zalo_qrpage(token: str = Query(default="")) -> HTMLResponse:
     """Simple QR login page with 5-second status polling."""
