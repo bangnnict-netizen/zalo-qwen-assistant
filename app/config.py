@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     )
 
     groq_api_key: str = ""
+    llm_primary_model: str = "qwen/qwen3.6-27b"
+    llm_fallback_model: str = "openai/gpt-oss-20b"
     supabase_url: str = ""
     supabase_key: str = ""
     airtable_api_key: str = ""
