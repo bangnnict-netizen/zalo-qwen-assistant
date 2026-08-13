@@ -112,6 +112,21 @@ class RealZaloBridge(ZaloBridge):
         """Force-save the current Zalo session to Supabase."""
         return self._persist_session()
 
+    def refresh_qr_login(self) -> bool:
+        """Discard stale QR/login thread and start a fresh QR login flow."""
+        with self._lock:
+            if self._status == "connected":
+                return False
+            self._status = "awaiting_qr"
+            self._qr_image_b64 = None
+            self._client = None
+            self._login_thread = None
+        if QR_PATH.exists():
+            QR_PATH.unlink(missing_ok=True)
+        logger.info("Refreshing Zalo QR login")
+        self._start_qr_login()
+        return True
+
     def render_qr_html(self, poll_url: str) -> str:
         qr_src = (
             f"data:image/png;base64,{self._qr_image_b64}"
@@ -178,20 +193,35 @@ class RealZaloBridge(ZaloBridge):
 
     def _try_restore_session(self, payload: dict[str, Any]) -> bool:
         try:
+            cookies = payload.get("cookies") or {}
+            imei = payload.get("imei")
+            user_agent = payload.get("user_agent", DEFAULT_USER_AGENT)
+            config = payload.get("config")
+            if not cookies or not imei:
+                return False
+
             client = self._zalo_client_factory(
                 phone=None,
                 password=None,
-                imei=payload.get("imei"),
-                session_cookies=payload.get("cookies"),
-                user_agent=payload.get("user_agent", DEFAULT_USER_AGENT),
+                imei=None,
+                session_cookies=None,
+                user_agent=user_agent,
                 auto_login=False,
             )
-            client.setSession(payload.get("cookies") or {})
-            if hasattr(client, "_finalize_login_session"):
-                client._finalize_login_session(
-                    payload.get("cookies") or {},
-                    payload.get("user_agent", DEFAULT_USER_AGENT),
-                )
+            client.setSession(cookies)
+            client._imei = imei
+            client._state.user_imei = imei
+            if user_agent:
+                client._state._headers["User-Agent"] = user_agent
+
+            if isinstance(config, dict) and config.get("secret_key"):
+                client._state._config = config
+                client._state._loggedin = True
+                client._state.user_id = config.get("send2me_id")
+                client.uid = config.get("send2me_id")
+            else:
+                client._state.login(None, None, imei, user_agent=user_agent)
+
             if not client.isLoggedIn():
                 return False
             self._client = client
@@ -237,7 +267,9 @@ class RealZaloBridge(ZaloBridge):
                 self._start_listener()
             except Exception:
                 logger.error("QR login failed", exc_info=True)
-                self._status = "awaiting_qr"
+                with self._lock:
+                    self._status = "awaiting_qr"
+                    self._login_thread = None
 
         self._login_thread = threading.Thread(target=_run, daemon=True, name="zalo-qr-login")
         self._login_thread.start()
@@ -249,6 +281,7 @@ class RealZaloBridge(ZaloBridge):
             "cookies": self._client.getSession(),
             "imei": getattr(self._client, "_imei", None),
             "user_agent": DEFAULT_USER_AGENT,
+            "config": getattr(self._client._state, "_config", None),
         }
         try:
             self.repo.save_session(payload)

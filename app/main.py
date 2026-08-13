@@ -118,6 +118,18 @@ async def zalo_persist_session(
     return {"saved": saved}
 
 
+@app.post("/zalo/refresh-qr")
+async def zalo_refresh_qr(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Generate a fresh Zalo QR code (e.g. after timeout or failed scan)."""
+    _require_admin_token(x_admin_token)
+    if not isinstance(zalo_bridge, RealZaloBridge):
+        raise HTTPException(status_code=404, detail="Real Zalo bridge disabled")
+    started = zalo_bridge.refresh_qr_login()
+    return {"status": "awaiting_qr" if started else zalo_bridge.status}
+
+
 @app.get("/zalo/qrpage", response_class=HTMLResponse)
 async def zalo_qrpage(token: str = Query(default="")) -> HTMLResponse:
     """Simple QR login page with 5-second status polling."""
