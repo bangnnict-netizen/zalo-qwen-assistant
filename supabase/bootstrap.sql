@@ -15,6 +15,13 @@ CREATE TABLE IF NOT EXISTS message_logs (
     created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS group_bindings (
+    group_id text PRIMARY KEY,
+    group_type text NOT NULL,
+    name text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE OR REPLACE FUNCTION ensure_zalo_tables()
 RETURNS void
 LANGUAGE plpgsql
@@ -35,6 +42,12 @@ BEGIN
         gender text NOT NULL DEFAULT 'unknown',
         text text NOT NULL DEFAULT '',
         created_at timestamptz NOT NULL DEFAULT now()
+    );
+    CREATE TABLE IF NOT EXISTS group_bindings (
+        group_id text PRIMARY KEY,
+        group_type text NOT NULL,
+        name text NOT NULL DEFAULT '',
+        updated_at timestamptz NOT NULL DEFAULT now()
     );
 END;
 $$;

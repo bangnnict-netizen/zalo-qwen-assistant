@@ -398,8 +398,12 @@ class RealZaloBridge(ZaloBridge):
 
             text = message if isinstance(message, str) else str(message or "")
             sender_name = getattr(message_object, "dName", "") or ""
+            group_id = str(thread_id)
+            if not bridge.pipeline.is_declared_group(group_id):
+                return
+
             event = {
-                "group_id": str(thread_id),
+                "group_id": group_id,
                 "sender_id": str(author_id),
                 "sender_name": str(sender_name),
                 "sender_gender": "unknown",

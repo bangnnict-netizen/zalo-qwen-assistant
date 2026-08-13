@@ -33,6 +33,7 @@ def _bridge(**kwargs) -> RealZaloBridge:
     repo.ensure_tables.return_value = ["zalo_session", "message_logs"]
     pipeline = AsyncMock(spec=MessagePipeline)
     pipeline.handle.return_value = None
+    pipeline.is_declared_group.return_value = True
     sleeps: list[float] = []
     return RealZaloBridge(
         pipeline=pipeline,
@@ -88,6 +89,31 @@ async def test_group_messages_are_logged() -> None:
 
     bridge.repo.log_message.assert_called_once()
     run_mock.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_undeclared_group_messages_are_silent() -> None:
+    bridge = _bridge()
+    bridge.pipeline.is_declared_group.return_value = False
+    client = MagicMock()
+    bridge._client = client
+    bridge._bind_message_handler()
+
+    with (
+        patch("app.services.zalo_bridge_real.asyncio.run") as run_mock,
+    ):
+        handler = client.onMessage
+        handler(
+            "mid",
+            "user1",
+            "@QwenAssist giờ nghỉ?",
+            MagicMock(dName="Anh Bằng"),
+            "unknown_group",
+            1,
+        )
+
+    bridge.repo.log_message.assert_not_called()
+    run_mock.assert_not_called()
 
 
 def test_save_session_after_restore_success() -> None:

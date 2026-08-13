@@ -14,7 +14,7 @@ from app.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 SESSION_ROW_ID = "default"
-TABLES = ("zalo_session", "message_logs")
+TABLES = ("zalo_session", "message_logs", "group_bindings")
 
 CREATE_ZALO_SESSION_SQL = """
 CREATE TABLE IF NOT EXISTS zalo_session (
@@ -33,6 +33,15 @@ CREATE TABLE IF NOT EXISTS message_logs (
     gender text NOT NULL DEFAULT 'unknown',
     text text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL DEFAULT now()
+);
+"""
+
+CREATE_GROUP_BINDINGS_SQL = """
+CREATE TABLE IF NOT EXISTS group_bindings (
+    group_id text PRIMARY KEY,
+    group_type text NOT NULL,
+    name text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 """
 
@@ -91,10 +100,15 @@ class SupabaseRepo:
             with conn.cursor() as cur:
                 cur.execute(CREATE_ZALO_SESSION_SQL)
                 cur.execute(CREATE_MESSAGE_LOGS_SQL)
+                cur.execute(CREATE_GROUP_BINDINGS_SQL)
 
     def _create_tables_with_http(self) -> None:
         """Best-effort DDL bootstrap via Supabase HTTP when DB URL is unavailable."""
-        sql = f"{CREATE_ZALO_SESSION_SQL.strip()}\n{CREATE_MESSAGE_LOGS_SQL.strip()}"
+        sql = (
+            f"{CREATE_ZALO_SESSION_SQL.strip()}\n"
+            f"{CREATE_MESSAGE_LOGS_SQL.strip()}\n"
+            f"{CREATE_GROUP_BINDINGS_SQL.strip()}"
+        )
         headers = {
             "apikey": self.settings.supabase_key,
             "Authorization": f"Bearer {self.settings.supabase_key}",
@@ -188,6 +202,34 @@ class SupabaseRepo:
         )
         return result.data or []
 
+    def list_bindings(self) -> list[dict[str, Any]]:
+        if not self._group_bindings_table_exists():
+            return []
+        result = (
+            self.client.table("group_bindings")
+            .select("group_id,group_type,name,updated_at")
+            .order("updated_at", desc=True)
+            .execute()
+        )
+        return result.data or []
+
+    def upsert_binding(self, group_id: str, name: str, group_type: str) -> None:
+        if group_type not in ("internal", "customer"):
+            raise ValueError("group_type must be internal or customer")
+        self.ensure_tables()
+        row = {
+            "group_id": group_id,
+            "group_type": group_type,
+            "name": name,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.client.table("group_bindings").upsert(row).execute()
+
+    def delete_binding(self, group_id: str) -> None:
+        if not self._group_bindings_table_exists():
+            return
+        self.client.table("group_bindings").delete().eq("group_id", group_id).execute()
+
     def delete_old_messages(self, older_than_days: int | None = None) -> int:
         days = older_than_days if older_than_days is not None else self.settings.ttl_days
         if not self._tables_exist():
@@ -205,6 +247,16 @@ class SupabaseRepo:
         try:
             self.client.table("zalo_session").select("id").limit(1).execute()
             self.client.table("message_logs").select("id").limit(1).execute()
+            return True
+        except Exception as exc:
+            message = str(exc).lower()
+            if "could not find the table" in message or "pgrst205" in message:
+                return False
+            raise
+
+    def _group_bindings_table_exists(self) -> bool:
+        try:
+            self.client.table("group_bindings").select("group_id").limit(1).execute()
             return True
         except Exception as exc:
             message = str(exc).lower()

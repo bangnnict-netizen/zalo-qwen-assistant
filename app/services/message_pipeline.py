@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import Settings, get_settings
+from app.repositories.supabase_repo import SupabaseRepo
+from app.services.group_bindings import GroupBindingRegistry
 from app.services.router_service import MessageRouter
 
 
@@ -15,14 +17,27 @@ class MessagePipeline:
         self,
         router: MessageRouter | None = None,
         settings: Settings | None = None,
+        bindings: GroupBindingRegistry | None = None,
+        repo: SupabaseRepo | None = None,
     ) -> None:
         self.router = router or MessageRouter()
         self.settings = settings or get_settings()
+        self.repo = repo
+        self.bindings = bindings or GroupBindingRegistry(settings=self.settings, repo=repo)
+
+    def reload_bindings(self) -> None:
+        self.bindings.reload()
+
+    def is_declared_group(self, group_id: str) -> bool:
+        return self.bindings.is_declared(group_id)
 
     async def handle(self, event: dict[str, Any]) -> dict[str, object] | None:
         text = str(event.get("text", ""))
         group_id = str(event.get("group_id", ""))
         sender_gender = str(event.get("sender_gender", "unknown"))
+
+        if not self.is_declared_group(group_id):
+            return None
 
         if self.settings.bot_tag not in text:
             return None
@@ -50,11 +65,7 @@ class MessagePipeline:
         }
 
     def _resolve_group_type(self, group_id: str) -> str | None:
-        if group_id in self.settings.allowed_internal_group_ids:
-            return "internal"
-        if group_id in self.settings.allowed_customer_group_ids:
-            return "customer"
-        return None
+        return self.bindings.resolve_group_type(group_id)
 
     @staticmethod
     def _resolve_honorific(sender_gender: str) -> str:
