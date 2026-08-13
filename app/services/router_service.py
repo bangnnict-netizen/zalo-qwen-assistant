@@ -37,6 +37,7 @@ class MessageRouter:
         self,
         group_type: str,
         question: str,
+        honorific: str | None = None,
     ) -> dict[str, object]:
         if group_type not in PERSONA_FILES:
             raise ValueError(f"Unsupported group_type: {group_type}")
@@ -45,6 +46,13 @@ class MessageRouter:
         sources = self.rag.search(group_type, question, top_k=3)
 
         system_parts = [persona]
+        if honorific:
+            gender_hint = {"anh": "nam", "chị": "nữ"}.get(
+                honorific, "chưa rõ giới tính"
+            )
+            system_parts.append(
+                f"Người hỏi là {gender_hint}, hãy gọi là '{honorific}'."
+            )
         if sources:
             docs = "\n\n".join(
                 f"### {item['heading']}\n{item['content']}" for item in sources

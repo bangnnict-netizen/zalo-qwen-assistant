@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Annotated
 
-from pydantic import field_validator
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -33,12 +33,17 @@ class Settings(BaseSettings):
     groq_api_key: str = ""
     llm_primary_model: str = "qwen/qwen3.6-27b"
     llm_fallback_model: str = "openai/gpt-oss-20b"
+    bot_tag: str = "@QwenAssist"
     supabase_url: str = ""
     supabase_key: str = ""
     airtable_api_key: str = ""
     airtable_base_id: str = ""
-    allowed_internal_group_ids: Annotated[list[str], NoDecode] = []
-    allowed_customer_group_ids: Annotated[list[str], NoDecode] = []
+    allowed_internal_group_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["group_internal_demo"]
+    )
+    allowed_customer_group_ids: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["group_customer_demo"]
+    )
     admin_user_ids: Annotated[list[str], NoDecode] = []
     ttl_days: int = 3
     zalo_max_msg_per_min: int = 6
