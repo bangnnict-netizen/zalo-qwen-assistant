@@ -1,29 +1,53 @@
 """FastAPI entrypoint for Zalo Qwen Assistant."""
 
+from __future__ import annotations
+
+import asyncio
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
 from app.config import get_settings
+from app.repositories.supabase_repo import SupabaseRepo
 from app.services.llm_service import LLMService
 from app.services.message_pipeline import MessagePipeline
 from app.services.rag_service import RAGService
 from app.services.router_service import MessageRouter
 from app.services.zalo_bridge import MockZaloBridge
+from app.services.zalo_bridge_real import RealZaloBridge
 
 settings = get_settings()
 llm_service = LLMService(settings)
 rag_service = RAGService()
 router = MessageRouter(llm=llm_service, rag=rag_service)
 pipeline = MessagePipeline(router=router, settings=settings)
-zalo_bridge = MockZaloBridge(settings=settings)
+supabase_repo = SupabaseRepo(settings)
+
+if settings.enable_zalo_real:
+    zalo_bridge: MockZaloBridge | RealZaloBridge = RealZaloBridge(
+        pipeline=pipeline,
+        repo=supabase_repo,
+        settings=settings,
+    )
+else:
+    zalo_bridge = MockZaloBridge(settings=settings)
+
+
+def _require_admin_token(token: str | None) -> None:
+    if not settings.admin_token or token != settings.admin_token:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     rag_service.ensure_index()
+    loop = asyncio.get_running_loop()
+    if isinstance(zalo_bridge, RealZaloBridge):
+        zalo_bridge.set_event_loop(loop)
+        zalo_bridge.start()
     yield
     rag_service.close()
 
@@ -71,3 +95,22 @@ async def simulate(payload: SimulateEvent) -> dict[str, object]:
         "honorific": result["honorific"],
         "model_used": result["model_used"],
     }
+
+
+@app.get("/zalo/status")
+async def zalo_status(x_admin_token: str | None = Header(default=None)) -> dict[str, str]:
+    """Return current Zalo bridge connection status."""
+    _require_admin_token(x_admin_token)
+    if isinstance(zalo_bridge, RealZaloBridge):
+        return zalo_bridge.get_status()
+    return {"status": "mock"}
+
+
+@app.get("/zalo/qrpage", response_class=HTMLResponse)
+async def zalo_qrpage(token: str = Query(default="")) -> HTMLResponse:
+    """Simple QR login page with 5-second status polling."""
+    _require_admin_token(token)
+    if not isinstance(zalo_bridge, RealZaloBridge):
+        raise HTTPException(status_code=404, detail="Real Zalo bridge disabled")
+    html = zalo_bridge.render_qr_html("/zalo/status")
+    return HTMLResponse(content=html)

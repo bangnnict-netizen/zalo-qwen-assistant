@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     bot_tag: str = "@QwenAssist"
     supabase_url: str = ""
     supabase_key: str = ""
+    supabase_db_url: str = ""
+    admin_token: str = ""
+    enable_zalo_real: bool = True
     airtable_api_key: str = ""
     airtable_base_id: str = ""
     allowed_internal_group_ids: Annotated[list[str], NoDecode] = Field(
