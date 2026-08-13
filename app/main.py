@@ -45,6 +45,10 @@ def _require_admin_token(token: str | None) -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     rag_service.ensure_index()
+    try:
+        supabase_repo.ensure_group_bindings_table()
+    except Exception:
+        pass
     pipeline.reload_bindings()
     loop = asyncio.get_running_loop()
     if isinstance(zalo_bridge, RealZaloBridge):
@@ -167,14 +171,17 @@ async def zalo_bindgroup(
 ) -> dict[str, bool]:
     """Create, update, or remove a Supabase group binding."""
     _require_admin_token(x_admin_token)
-    if payload.group_type is None:
-        supabase_repo.delete_binding(payload.group_id)
-    else:
-        supabase_repo.upsert_binding(
-            payload.group_id,
-            payload.name,
-            payload.group_type,
-        )
+    try:
+        if payload.group_type is None:
+            supabase_repo.delete_binding(payload.group_id)
+        else:
+            supabase_repo.upsert_binding(
+                payload.group_id,
+                payload.name,
+                payload.group_type,
+            )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
     pipeline.reload_bindings()
     return {"ok": True}
 

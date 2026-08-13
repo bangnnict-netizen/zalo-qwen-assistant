@@ -14,6 +14,7 @@ from app.config import Settings, get_settings
 logger = logging.getLogger(__name__)
 
 SESSION_ROW_ID = "default"
+BINDINGS_SESSION_ID = "group_bindings_cache"
 TABLES = ("zalo_session", "message_logs", "group_bindings")
 
 CREATE_ZALO_SESSION_SQL = """
@@ -66,7 +67,8 @@ class SupabaseRepo:
 
     def ensure_tables(self) -> list[str]:
         """Create required tables when missing. Returns ensured table names."""
-        if self._tables_exist():
+        self.ensure_group_bindings_table()
+        if self._core_tables_exist():
             return list(TABLES)
 
         if self._try_rpc_bootstrap():
@@ -76,7 +78,8 @@ class SupabaseRepo:
         else:
             self._create_tables_with_http()
 
-        if not self._tables_exist():
+        self.ensure_group_bindings_table()
+        if not self._core_tables_exist():
             raise RuntimeError(
                 "Failed to create Supabase tables. Run supabase/bootstrap.sql once "
                 "or configure SUPABASE_DB_URL for automatic DDL."
@@ -84,6 +87,26 @@ class SupabaseRepo:
 
         logger.info("Ensured Supabase tables: %s", ", ".join(TABLES))
         return list(TABLES)
+
+    def ensure_group_bindings_table(self) -> None:
+        """Ensure group_bindings exists even when core tables were bootstrapped earlier."""
+        if self._group_bindings_table_exists():
+            return
+        if self.settings.supabase_db_url.strip():
+            import psycopg2
+
+            with psycopg2.connect(self.settings.supabase_db_url.strip()) as conn:
+                conn.autocommit = True
+                with conn.cursor() as cur:
+                    cur.execute(CREATE_GROUP_BINDINGS_SQL)
+            return
+        self._try_rpc_bootstrap()
+        if self._group_bindings_table_exists():
+            return
+        logger.warning(
+            "group_bindings table is missing. Run the latest supabase/bootstrap.sql "
+            "in Supabase SQL Editor, then bind groups again via /zalo/admin."
+        )
 
     def _try_rpc_bootstrap(self) -> bool:
         try:
@@ -145,7 +168,8 @@ class SupabaseRepo:
         )
 
     def save_session(self, payload: dict[str, Any]) -> None:
-        self.ensure_tables()
+        if not self._core_tables_exist():
+            self.ensure_tables()
         row = {
             "id": SESSION_ROW_ID,
             "payload": payload,
@@ -154,7 +178,7 @@ class SupabaseRepo:
         self.client.table("zalo_session").upsert(row).execute()
 
     def load_session(self) -> dict[str, Any] | None:
-        if not self._tables_exist():
+        if not self._core_tables_exist():
             return None
         result = (
             self.client.table("zalo_session")
@@ -178,7 +202,8 @@ class SupabaseRepo:
         gender: str,
         text: str,
     ) -> None:
-        self.ensure_tables()
+        if not self._core_tables_exist():
+            self.ensure_tables()
         self.client.table("message_logs").insert(
             {
                 "group_id": group_id,
@@ -190,7 +215,7 @@ class SupabaseRepo:
         ).execute()
 
     def recent_logs(self, limit: int = 20) -> list[dict[str, Any]]:
-        if not self._tables_exist():
+        if not self._core_tables_exist():
             return []
         capped = max(1, min(limit, 100))
         result = (
@@ -203,36 +228,95 @@ class SupabaseRepo:
         return result.data or []
 
     def list_bindings(self) -> list[dict[str, Any]]:
-        if not self._group_bindings_table_exists():
-            return []
-        result = (
-            self.client.table("group_bindings")
-            .select("group_id,group_type,name,updated_at")
-            .order("updated_at", desc=True)
-            .execute()
-        )
-        return result.data or []
+        if self._group_bindings_table_exists():
+            result = (
+                self.client.table("group_bindings")
+                .select("group_id,group_type,name,updated_at")
+                .order("updated_at", desc=True)
+                .execute()
+            )
+            return result.data or []
+        return self._list_bindings_from_session_cache()
 
     def upsert_binding(self, group_id: str, name: str, group_type: str) -> None:
         if group_type not in ("internal", "customer"):
             raise ValueError("group_type must be internal or customer")
-        self.ensure_tables()
+        self.ensure_group_bindings_table()
         row = {
             "group_id": group_id,
             "group_type": group_type,
             "name": name,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
-        self.client.table("group_bindings").upsert(row).execute()
+        if self._group_bindings_table_exists():
+            self.client.table("group_bindings").upsert(row).execute()
+            return
+        self._upsert_binding_in_session_cache(row)
+        logger.warning(
+            "group_bindings table missing; stored binding for %s in zalo_session fallback. "
+            "Run supabase/bootstrap.sql to migrate to the dedicated table.",
+            group_id,
+        )
 
     def delete_binding(self, group_id: str) -> None:
-        if not self._group_bindings_table_exists():
+        if self._group_bindings_table_exists():
+            self.client.table("group_bindings").delete().eq("group_id", group_id).execute()
             return
-        self.client.table("group_bindings").delete().eq("group_id", group_id).execute()
+        self._delete_binding_from_session_cache(group_id)
+
+    def _list_bindings_from_session_cache(self) -> list[dict[str, Any]]:
+        if not self._core_tables_exist():
+            return []
+        payload = self._load_session_payload(BINDINGS_SESSION_ID)
+        items = payload.get("items") if isinstance(payload, dict) else None
+        if not isinstance(items, list):
+            return []
+        return [item for item in items if isinstance(item, dict) and item.get("group_id")]
+
+    def _upsert_binding_in_session_cache(self, row: dict[str, Any]) -> None:
+        payload = self._load_session_payload(BINDINGS_SESSION_ID) or {"items": []}
+        items = payload.get("items")
+        if not isinstance(items, list):
+            items = []
+        items = [item for item in items if item.get("group_id") != row["group_id"]]
+        items.append(row)
+        self._save_session_payload(BINDINGS_SESSION_ID, {"items": items})
+
+    def _delete_binding_from_session_cache(self, group_id: str) -> None:
+        payload = self._load_session_payload(BINDINGS_SESSION_ID) or {"items": []}
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return
+        items = [item for item in items if item.get("group_id") != group_id]
+        self._save_session_payload(BINDINGS_SESSION_ID, {"items": items})
+
+    def _load_session_payload(self, row_id: str) -> dict[str, Any] | None:
+        result = (
+            self.client.table("zalo_session")
+            .select("payload")
+            .eq("id", row_id)
+            .limit(1)
+            .execute()
+        )
+        rows = result.data or []
+        if not rows:
+            return None
+        payload = rows[0].get("payload")
+        return payload if isinstance(payload, dict) else None
+
+    def _save_session_payload(self, row_id: str, payload: dict[str, Any]) -> None:
+        if not self._core_tables_exist():
+            raise RuntimeError("zalo_session table is missing")
+        row = {
+            "id": row_id,
+            "payload": payload,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self.client.table("zalo_session").upsert(row).execute()
 
     def delete_old_messages(self, older_than_days: int | None = None) -> int:
         days = older_than_days if older_than_days is not None else self.settings.ttl_days
-        if not self._tables_exist():
+        if not self._core_tables_exist():
             return 0
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         result = (
@@ -244,6 +328,9 @@ class SupabaseRepo:
         return len(result.data or [])
 
     def _tables_exist(self) -> bool:
+        return self._core_tables_exist() and self._group_bindings_table_exists()
+
+    def _core_tables_exist(self) -> bool:
         try:
             self.client.table("zalo_session").select("id").limit(1).execute()
             self.client.table("message_logs").select("id").limit(1).execute()

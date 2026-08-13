@@ -68,10 +68,37 @@ def test_ensure_tables_creates_when_missing() -> None:
     repo = SupabaseRepo(_settings())
 
     with (
-        patch.object(repo, "_tables_exist", side_effect=[False, True]),
+        patch.object(repo, "ensure_group_bindings_table"),
+        patch.object(repo, "_core_tables_exist", side_effect=[False, True]),
         patch.object(repo, "_create_tables_with_psycopg") as create_mock,
     ):
         created = repo.ensure_tables()
 
     assert created == list(TABLES)
     create_mock.assert_called_once()
+
+
+def test_bindings_fallback_to_session_cache_when_table_missing() -> None:
+    repo = SupabaseRepo(_settings())
+    saved: dict[str, object] = {"items": []}
+
+    def _save(row_id: str, payload: dict[str, object]) -> None:
+        saved.clear()
+        saved.update(payload)
+
+    def _load(_row_id: str) -> dict[str, object] | None:
+        return dict(saved) if saved else None
+
+    with (
+        patch.object(repo, "_group_bindings_table_exists", return_value=False),
+        patch.object(repo, "ensure_group_bindings_table"),
+        patch.object(repo, "_core_tables_exist", return_value=True),
+        patch.object(repo, "_save_session_payload", side_effect=_save),
+        patch.object(repo, "_load_session_payload", side_effect=_load),
+    ):
+        repo.upsert_binding("7417141469033973442", "AI_Group", "internal")
+        rows = repo.list_bindings()
+
+    assert len(rows) == 1
+    assert rows[0]["group_id"] == "7417141469033973442"
+    assert rows[0]["group_type"] == "internal"
