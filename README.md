@@ -71,3 +71,11 @@ Biến `ENABLE_ZALO_REAL` (mặc định `true`) bật/tắt kết nối Zalo th
 **Dev local:** đặt `ENABLE_ZALO_REAL=false` trong `.env` để tránh tranh phiên Zalo với instance trên mây (Hugging Face Space / server production). Chỉ một instance nên giữ `true` và duy trì phiên đăng nhập QR.
 
 Trang quản trị nhóm: `/zalo/admin?token=<ADMIN_TOKEN>` — khai báo nhóm nội bộ / khách hàng. Group ID Zalo luôn được xử lý dưới dạng **string** (tránh mất chính xác số lớn > 2^53).
+
+## Tính năng vận hành mới
+
+- `/tomtat` (admin only, nội bộ): admin nhắn `/tomtat` hoặc `/tomtat 12` trong group nội bộ sẽ yêu cầu bot tóm tắt N giờ gần nhất (mặc định 24h) từ `message_logs` dưới dạng 5 ý chính, quyết định, việc cần làm và câu hỏi chưa trả lời. Chỉ admin trong `ADMIN_USER_IDS` mới được dùng.
+- Lead-capture (nhóm `customer`): khi khách hỏi về `giá|báo giá|bao nhiêu|hợp đồng`, bot yêu cầu `tên + số điện thoại` và lưu pending lead trong bộ nhớ (TTL 10 phút). Tin tiếp theo chứa số điện thoại (`0\\d{9,10}`) sẽ kích hoạt ghi lead lên Airtable (bảng `Leads`) và bot xác nhận.
+- Tra cứu đơn: tin chứa mã DH (ví dụ `DH1001`, `đơn DH1001`) sẽ truy vấn bảng `orders` trong Supabase và trả về `status`, `received_at`, `note` nếu tìm thấy.
+
+Xem `tests/test_ops.py` để biết kịch bản kiểm thử cho các flow này.

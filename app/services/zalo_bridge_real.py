@@ -14,8 +14,6 @@ from app.config import Settings, get_settings
 from app.core.rate_limiter import RateLimiter
 from app.repositories.supabase_repo import SupabaseRepo
 from app.services.message_pipeline import MessagePipeline
-from app.services.voice_listener import VoiceListener, is_voice_message
-from app.services.voice_triggers import VOICE_LOG_PREFIX, VOICE_REPLY_PREFIX
 from app.core.debug_events import record_event
 import time
 from app.services.zalo_bridge import ZaloBridge
@@ -45,12 +43,12 @@ class RealZaloBridge(ZaloBridge):
         *,
         zalo_client_factory: Callable[..., Any] | None = None,
         sleep: Callable[[float], None] | None = None,
-        voice_listener: VoiceListener | None = None,
+        **kwargs,
     ) -> None:
         self.settings = settings or get_settings()
         self.pipeline = pipeline or MessagePipeline(settings=self.settings)
         self.repo = repo or SupabaseRepo(self.settings)
-        self.voice_listener = voice_listener or VoiceListener()
+        # voice module removed — no voice_listener
         self._rate_limiter = rate_limiter or RateLimiter(
             max_per_min=self.settings.zalo_max_msg_per_min,
             min_delay_sec=self.settings.zalo_min_delay_sec,
@@ -449,18 +447,13 @@ class RealZaloBridge(ZaloBridge):
             if not declared:
                 return
 
-            if is_voice_message(message_object):
-                loop = getattr(bridge, "_loop", None)
-                coro = bridge._handle_voice_event(
-                    message_object=message_object,
-                    author_id=str(author_id),
-                    sender_name=str(sender_name),
-                    group_id=group_id,
-                )
-                if loop and loop.is_running():
-                    asyncio.run_coroutine_threadsafe(coro, loop)
-                else:
-                    asyncio.run(coro)
+            # Voice module removed: ignore voice message types here and treat only text events
+            try:
+                msg_type = getattr(message_object, "msgType", None)
+            except Exception:
+                msg_type = None
+            if msg_type == "chat.voice":
+                # ignore voice messages entirely after voice module removal
                 return
 
             text = message if isinstance(message, str) else str(message or "")
@@ -540,60 +533,4 @@ class RealZaloBridge(ZaloBridge):
             return
         await self.send(str(event["group_id"]), str(result["answer"]))
 
-    async def _handle_voice_event(
-        self,
-        *,
-        message_object: Any,
-        author_id: str,
-        sender_name: str,
-        group_id: str,
-    ) -> None:
-        client = self._client
-        if client is None:
-            return
-
-        voice_result = await self.voice_listener.process(message_object, client)
-        if voice_result is None:
-            return
-
-        log_text = f"{VOICE_LOG_PREFIX}{voice_result.transcript}"
-        try:
-            self.repo.log_message(
-                group_id=group_id,
-                sender_id=author_id,
-                sender_name=sender_name,
-                gender="unknown",
-                text=log_text,
-            )
-        except Exception:
-            logger.warning("Failed to log Zalo voice message", exc_info=True)
-
-        if not voice_result.should_reply:
-            return
-
-        event = {
-            "group_id": group_id,
-            "sender_id": author_id,
-            "sender_name": sender_name,
-            "sender_gender": "unknown",
-            "text": voice_result.transcript,
-        }
-        # Route the cleaned question through the pipeline and capture diagnostics
-        try:
-            record_event({"debug": "pipeline_handle_voice_start", "group_id": group_id, "question": voice_result.question[:300]})
-            result = await self.pipeline.handle_voice(event, voice_result.question)
-            record_event({"debug": "pipeline_handle_voice_result", "group_id": group_id, "result_present": result is not None, "answer_preview": (result.get('answer')[:200] if result else None)})
-        except Exception as exc:
-            record_event({"debug": "pipeline_handle_voice_exception", "group_id": group_id, "error": repr(exc)})
-            logger.exception("pipeline.handle_voice failed for group %s", group_id)
-            return
-
-        if result is None:
-            return
-
-        answer = f"{VOICE_REPLY_PREFIX}{result['answer']}"
-        try:
-            await self.send(group_id, answer)
-        except Exception:
-            # send() already records exceptions; ensure we log for this flow as well
-            record_event({"debug": "send_failed_during_voice_flow", "group_id": group_id, "answer_preview": answer[:200]})
+    # Voice handling removed — see commit history for prior implementation

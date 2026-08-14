@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from app.config import Settings, get_settings
 from app.repositories.supabase_repo import SupabaseRepo
 from app.services.group_bindings import GroupBindingRegistry
 from app.services.router_service import MessageRouter
+from app.services.lead_capture import PendingLeadRegistry, create_lead_via_airtable
 
 
 def _tag_patterns(tags: list[str]) -> list[re.Pattern[str]]:
@@ -49,6 +51,8 @@ class MessagePipeline:
         self.settings = settings or get_settings()
         self.repo = repo
         self.bindings = bindings or GroupBindingRegistry(settings=self.settings, repo=repo)
+        # in-memory pending leads
+        self.lead_registry = PendingLeadRegistry()
 
     def reload_bindings(self) -> None:
         self.bindings.reload()
@@ -60,15 +64,71 @@ class MessagePipeline:
         text = str(event.get("text", ""))
         group_id = str(event.get("group_id", ""))
         sender_gender = str(event.get("sender_gender", "unknown"))
+        sender_id = str(event.get("sender_id", ""))
+
+        # ADMIN command: /tomtat [hours]
+        if text.strip().lower().startswith("/tomtat"):
+            # only configured admins can use this
+            if sender_id not in (self.settings.admin_user_ids or []):
+                return None
+            parts = text.strip().split()
+            hours = 24
+            if len(parts) >= 2:
+                try:
+                    hours = int(parts[1])
+                except Exception:
+                    hours = 24
+            # collect recent logs for this group within hours
+            try:
+                rows = (self.repo.recent_logs(limit=1000) if self.repo else [])
+                cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+                items = [r for r in rows if r.get("group_id") == group_id and datetime.fromisoformat(r.get("created_at").replace("Z", "+00:00")) >= cutoff]
+            except Exception:
+                items = []
+            # build prompt and call LLM for an organized summary
+            context = "\n".join(f"[{r.get('created_at')}] {r.get('sender_name')}: {r.get('text')}" for r in items)
+            system = "Tóm tắt ngắn (5 ý chính, quyết định, việc cần làm, câu hỏi chưa trả lời) theo phong cách persona nội bộ."
+            llm_resp = await self.router.llm.chat(context or "Không có tin nào.", system=system)
+            return {"answer": llm_resp.get("answer", ""), "model_used": llm_resp.get("model_used"), "sources": []}
 
         if not self.is_declared_group(group_id):
             return None
 
-        if not contains_bot_tag(text, self.settings.bot_tags):
-            return None
+        # Order lookup: detect order codes like DH1001 or "đơn DH1001"
+        order_match = re.search(r"\b(?:dh|đh)\s*0*(\d+)\b", text, re.IGNORECASE)
+        if order_match:
+            order_id = order_match.group(1)
+            try:
+                order = self.repo.get_order(order_id) if self.repo else None
+                if order:
+                    answer = f"Đơn {order_id}: status={order.get('status')}, received_at={order.get('received_at')}, note={order.get('note','')}"
+                else:
+                    answer = "Em chưa tìm thấy mã đơn. Vui lòng kiểm tra lại mã đơn."
+            except Exception:
+                answer = "Em không truy xuất được dữ liệu đơn lúc này."
+            return {"answer": answer, "model_used": None, "sources": []}
+
+        # Lead capture (customer groups): detect price/quote intents
+        if self._resolve_group_type(group_id) == "customer":
+            if re.search(r"giá|báo giá|bao nhiêu|hợp đồng", text, re.IGNORECASE):
+                # set pending lead
+                await self.lead_registry.set_pending(group_id, sender_id, need=text)
+                return {"answer": "Em xin tên + số điện thoại để bộ phận kinh doanh liên hệ ạ.", "model_used": None, "sources": []}
+            # check if pending and message contains phone
+            pending_lead = await self.lead_registry.pop_if_phone(group_id, sender_id, text)
+            if pending_lead:
+                # create via airtable
+                created = await create_lead_via_airtable(pending_lead)
+                if created is not None:
+                    return {"answer": "Em đã ghi nhận, nhân viên sẽ gọi lại ạ.", "model_used": None, "sources": []}
+                return {"answer": "Em chưa lưu được thông tin lúc này, bạn thử lại sau nhé.", "model_used": None, "sources": []}
 
         group_type = self._resolve_group_type(group_id)
         if group_type is None:
+            return None
+
+        # Existing bot-tag flow: require bot tags
+        if not contains_bot_tag(text, self.settings.bot_tags):
             return None
 
         question = strip_bot_tags(text, self.settings.bot_tags)
