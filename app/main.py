@@ -107,7 +107,8 @@ async def health_airtable(x_admin_token: str | None = Header(default=None)) -> d
         return {"status": "error", "code": 401, "reason": "AIRTABLE_BASE_ID not configured"}
     
     # Try a simple API call to Airtable (list records with 0 maxRecords to minimize data)
-    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
+    table_name = "orders"
+    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/{table_name}"
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}"}
     params = {"maxRecords": 1}
     
@@ -119,7 +120,8 @@ async def health_airtable(x_admin_token: str | None = Header(default=None)) -> d
                     "status": "ok",
                     "code": resp.status_code,
                     "base_id": settings.airtable_base_id,
-                    "table": "orders"
+                    "table_name": table_name,
+                    "url": url
                 }
             else:
                 try:
@@ -129,12 +131,15 @@ async def health_airtable(x_admin_token: str | None = Header(default=None)) -> d
                 return {
                     "status": "error",
                     "code": resp.status_code,
+                    "base_id": settings.airtable_base_id,
+                    "table_name": table_name,
+                    "url": url,
                     "reason": error_body
                 }
     except httpx.TimeoutException:
-        return {"status": "error", "code": 408, "reason": "Airtable API timeout"}
+        return {"status": "error", "code": 408, "base_id": settings.airtable_base_id, "table_name": table_name, "reason": "Airtable API timeout"}
     except Exception as exc:
-        return {"status": "error", "code": 500, "reason": str(exc)}
+        return {"status": "error", "code": 500, "base_id": settings.airtable_base_id, "table_name": table_name, "reason": str(exc)}
 
 
 @app.post("/ask")
