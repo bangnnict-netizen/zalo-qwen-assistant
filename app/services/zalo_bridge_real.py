@@ -16,6 +16,8 @@ from app.repositories.supabase_repo import SupabaseRepo
 from app.services.message_pipeline import MessagePipeline
 from app.services.voice_listener import VoiceListener, is_voice_message
 from app.services.voice_triggers import VOICE_LOG_PREFIX, VOICE_REPLY_PREFIX
+from app.core.debug_events import record_event
+import time
 from app.services.zalo_bridge import ZaloBridge
 
 from app.services import zlapi_patch  # noqa: F401 — patch zlapi before use
@@ -399,6 +401,31 @@ class RealZaloBridge(ZaloBridge):
         ) -> None:
             if not bridge._is_group_thread(thread_type):
                 return
+            # Record a compact snapshot of the raw event for debugging
+            try:
+                obj_dict = (
+                    getattr(message_object, "__dict__", None)
+                    or {k: getattr(message_object, k, None) for k in dir(message_object)}
+                )
+            except Exception:
+                obj_dict = {"repr": repr(message_object)}
+
+            record_event(
+                {
+                    "event": "zlapi_onMessage",
+                    "mid": str(mid),
+                    "author_id": str(author_id),
+                    "message": str(message) if isinstance(message, str) else repr(message),
+                    "msgType": getattr(message_object, "msgType", None),
+                    "content_preview": (getattr(message_object, "content", None)[:400]
+                                        if getattr(message_object, "content", None)
+                                        else None),
+                    "message_object_keys": list(obj_dict.keys()) if isinstance(obj_dict, dict) else None,
+                    "thread_id": str(thread_id),
+                    "thread_type": repr(thread_type),
+                    "ts": time.time(),
+                }
+            )
 
             sender_name = getattr(message_object, "dName", "") or ""
             group_id = str(thread_id)

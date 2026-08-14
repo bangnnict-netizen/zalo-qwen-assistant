@@ -19,6 +19,7 @@ from app.services.rag_service import RAGService
 from app.services.router_service import MessageRouter
 from app.services.zalo_bridge import MockZaloBridge
 from app.services.zalo_bridge_real import RealZaloBridge
+from app.core.debug_events import recent_events
 
 settings = get_settings()
 llm_service = LLMService(settings)
@@ -169,6 +170,13 @@ async def zalo_recent_logs(
     """Return latest rows from message_logs for debugging inbound traffic."""
     _require_admin_token(x_admin_token)
     return supabase_repo.recent_logs(limit=limit)
+
+
+@app.get("/zalo/debug-logs")
+async def zalo_debug_logs(x_admin_token: str | None = Header(default=None)) -> list[dict[str, object]]:
+    """Return the in-memory ring buffer of raw inbound events for debugging."""
+    _require_admin_token(x_admin_token)
+    return recent_events()
 
 
 @app.post("/zalo/bindgroup")
