@@ -99,17 +99,27 @@ class RealZaloBridge(ZaloBridge):
         await self._rate_limiter.wait_before_send()
         client = self._client
         if client is None or self._status != "connected":
+            record_event({"debug": "send_failed_not_connected", "group_id": group_id, "text_preview": text[:200]})
             raise RuntimeError("Zalo client is not connected")
 
         from zlapi import Message
         from zlapi.models import ThreadType
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None,
-            lambda: client.sendMessage(Message(text=text), group_id, ThreadType.GROUP),
-        )
-        logger.info("RealZaloBridge sent group message to %s", group_id)
+        def _send() -> None:
+            try:
+                client.sendMessage(Message(text=text), group_id, ThreadType.GROUP)
+                record_event({"debug": "send_success", "group_id": group_id, "text_preview": text[:200]})
+            except Exception as exc:  # capture and re-raise for outer coroutine
+                record_event({"debug": "send_exception", "group_id": group_id, "text_preview": text[:200], "error": repr(exc)})
+                raise
+
+        try:
+            await loop.run_in_executor(None, _send)
+            logger.info("RealZaloBridge sent group message to %s", group_id)
+        except Exception:
+            logger.exception("Failed to send group message to %s", group_id)
+            raise
 
     def get_status(self) -> dict[str, str]:
         return {"status": self._status}
