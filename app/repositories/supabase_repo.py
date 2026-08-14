@@ -227,25 +227,6 @@ class SupabaseRepo:
         )
         return result.data or []
 
-    def get_order(self, order_id: str) -> dict[str, Any] | None:
-        """Query an orders table for a single order_id. Returns row or None."""
-        if not self._core_tables_exist():
-            return None
-        try:
-            result = (
-                self.client.table("orders")
-                .select("*")
-                .eq("order_id", str(order_id))
-                .limit(1)
-                .execute()
-            )
-            rows = result.data or []
-            if not rows:
-                return None
-            return rows[0]
-        except Exception:
-            return None
-
 
     def list_bindings(self) -> list[dict[str, Any]]:
         if self._group_bindings_table_exists():
