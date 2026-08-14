@@ -86,16 +86,16 @@ async def test_order_lookup_found_and_not_found() -> None:
     router = MagicMock()
     pipeline = MessagePipeline(router=router, settings=settings, repo=repo)
 
-    # not found
-    repo.get_order.return_value = None
-    event = {"group_id": "group_internal_demo", "sender_id": "u1", "text": "@Byron DH1001"}
-    res = await pipeline.handle(event)
-    assert res is not None
-    assert "không tìm" in res["answer"] or "chưa" in res["answer"]
+    # not found (mock Airtable)
+    with patch("app.services.lead_capture.get_order_from_airtable", new=AsyncMock(return_value=None)):
+        event = {"group_id": "group_internal_demo", "sender_id": "u1", "text": "@Byron DH1001"}
+        res = await pipeline.handle(event)
+        assert res is not None
+        assert "không tìm" in res["answer"] or "chưa" in res["answer"]
 
     # found
-    repo.get_order.return_value = {"status": "delivered", "received_at": "2026-08-01", "note": "ok"}
-    event2 = {"group_id": "group_internal_demo", "sender_id": "u1", "text": "đơn DH1001"}
-    res2 = await pipeline.handle(event2)
-    assert res2 is not None
-    assert "Đơn 1001" in res2["answer"] or "status" in res2["answer"]
+    with patch("app.services.lead_capture.get_order_from_airtable", new=AsyncMock(return_value={"status": "delivered", "received_at": "2026-08-01", "note": "ok"})):
+        event2 = {"group_id": "group_internal_demo", "sender_id": "u1", "text": "đơn DH1001"}
+        res2 = await pipeline.handle(event2)
+        assert res2 is not None
+        assert "Đơn 1001" in res2["answer"] or "status" in res2["answer"]

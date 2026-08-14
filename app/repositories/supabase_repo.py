@@ -246,6 +246,7 @@ class SupabaseRepo:
         except Exception:
             return None
 
+
     def list_bindings(self) -> list[dict[str, Any]]:
         if self._group_bindings_table_exists():
             result = (

@@ -80,3 +80,31 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
     except Exception:
         return None
     return None
+
+
+async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
+    """Query Airtable `orders` table by order_id. Returns fields dict or None."""
+    settings = get_settings()
+    if not settings.airtable_api_key or not settings.airtable_base_id:
+        return None
+    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
+    headers = {"Authorization": f"Bearer {settings.airtable_api_key}"}
+    params = {"filterByFormula": f"{{order_id}}='{order_id}'", "maxRecords": 1}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.status_code >= 200 and resp.status_code < 300:
+                body = resp.json()
+                records = body.get("records") or []
+                if not records:
+                    return None
+                fields = records[0].get("fields", {})
+                # normalize to expected keys
+                return {
+                    "status": fields.get("status"),
+                    "received_at": fields.get("received_at"),
+                    "note": fields.get("note"),
+                }
+    except Exception:
+        return None
+    return None

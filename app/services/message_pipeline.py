@@ -99,7 +99,9 @@ class MessagePipeline:
         if order_match:
             order_id = order_match.group(1)
             try:
-                order = self.repo.get_order(order_id) if self.repo else None
+                from app.services.lead_capture import get_order_from_airtable
+
+                order = await get_order_from_airtable(order_id)
                 if order:
                     answer = f"Đơn {order_id}: status={order.get('status')}, received_at={order.get('received_at')}, note={order.get('note','')}"
                 else:
