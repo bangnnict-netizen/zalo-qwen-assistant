@@ -14,6 +14,8 @@ from app.config import Settings, get_settings
 from app.core.rate_limiter import RateLimiter
 from app.repositories.supabase_repo import SupabaseRepo
 from app.services.message_pipeline import MessagePipeline
+from app.services.voice_listener import VoiceListener, is_voice_message
+from app.services.voice_triggers import VOICE_LOG_PREFIX, VOICE_REPLY_PREFIX
 from app.services.zalo_bridge import ZaloBridge
 
 from app.services import zlapi_patch  # noqa: F401 — patch zlapi before use
@@ -41,10 +43,12 @@ class RealZaloBridge(ZaloBridge):
         *,
         zalo_client_factory: Callable[..., Any] | None = None,
         sleep: Callable[[float], None] | None = None,
+        voice_listener: VoiceListener | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.pipeline = pipeline or MessagePipeline(settings=self.settings)
         self.repo = repo or SupabaseRepo(self.settings)
+        self.voice_listener = voice_listener or VoiceListener()
         self._rate_limiter = rate_limiter or RateLimiter(
             max_per_min=self.settings.zalo_max_msg_per_min,
             min_delay_sec=self.settings.zalo_min_delay_sec,
@@ -396,12 +400,26 @@ class RealZaloBridge(ZaloBridge):
             if not bridge._is_group_thread(thread_type):
                 return
 
-            text = message if isinstance(message, str) else str(message or "")
             sender_name = getattr(message_object, "dName", "") or ""
             group_id = str(thread_id)
             if not bridge.pipeline.is_declared_group(group_id):
                 return
 
+            if is_voice_message(message_object):
+                loop = getattr(bridge, "_loop", None)
+                coro = bridge._handle_voice_event(
+                    message_object=message_object,
+                    author_id=str(author_id),
+                    sender_name=str(sender_name),
+                    group_id=group_id,
+                )
+                if loop and loop.is_running():
+                    asyncio.run_coroutine_threadsafe(coro, loop)
+                else:
+                    asyncio.run(coro)
+                return
+
+            text = message if isinstance(message, str) else str(message or "")
             event = {
                 "group_id": group_id,
                 "sender_id": str(author_id),
@@ -477,3 +495,47 @@ class RealZaloBridge(ZaloBridge):
         if result is None:
             return
         await self.send(str(event["group_id"]), str(result["answer"]))
+
+    async def _handle_voice_event(
+        self,
+        *,
+        message_object: Any,
+        author_id: str,
+        sender_name: str,
+        group_id: str,
+    ) -> None:
+        client = self._client
+        if client is None:
+            return
+
+        voice_result = await self.voice_listener.process(message_object, client)
+        if voice_result is None:
+            return
+
+        log_text = f"{VOICE_LOG_PREFIX}{voice_result.transcript}"
+        try:
+            self.repo.log_message(
+                group_id=group_id,
+                sender_id=author_id,
+                sender_name=sender_name,
+                gender="unknown",
+                text=log_text,
+            )
+        except Exception:
+            logger.warning("Failed to log Zalo voice message", exc_info=True)
+
+        if not voice_result.should_reply:
+            return
+
+        event = {
+            "group_id": group_id,
+            "sender_id": author_id,
+            "sender_name": sender_name,
+            "sender_gender": "unknown",
+            "text": voice_result.transcript,
+        }
+        result = await self.pipeline.handle_voice(event, voice_result.question)
+        if result is None:
+            return
+        answer = f"{VOICE_REPLY_PREFIX}{result['answer']}"
+        await self.send(group_id, answer)

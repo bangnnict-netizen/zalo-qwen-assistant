@@ -89,6 +89,40 @@ class MessagePipeline:
             "honorific": honorific,
         }
 
+    async def handle_voice(
+        self,
+        event: dict[str, Any],
+        question: str,
+    ) -> dict[str, object] | None:
+        """Route a voice transcript question (wake phrase already stripped)."""
+        group_id = str(event.get("group_id", ""))
+        sender_gender = str(event.get("sender_gender", "unknown"))
+
+        if not self.is_declared_group(group_id):
+            return None
+
+        cleaned = question.strip()
+        if not cleaned:
+            return None
+
+        group_type = self._resolve_group_type(group_id)
+        if group_type is None:
+            return None
+
+        honorific = self._resolve_honorific(sender_gender)
+        routed = await self.router.route(
+            group_type=group_type,
+            question=cleaned,
+            honorific=honorific,
+        )
+
+        return {
+            "answer": routed["answer"],
+            "model_used": routed["model_used"],
+            "sources": routed["sources"],
+            "honorific": honorific,
+        }
+
     def _resolve_group_type(self, group_id: str) -> str | None:
         return self.bindings.resolve_group_type(group_id)
 

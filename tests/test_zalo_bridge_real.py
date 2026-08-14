@@ -35,11 +35,13 @@ def _bridge(**kwargs) -> RealZaloBridge:
     pipeline.handle.return_value = None
     pipeline.is_declared_group.return_value = True
     sleeps: list[float] = []
+    voice_listener = AsyncMock()
     return RealZaloBridge(
         pipeline=pipeline,
         repo=repo,
         settings=_settings(),
         sleep=sleeps.append,
+        voice_listener=voice_listener,
         **kwargs,
     )
 
