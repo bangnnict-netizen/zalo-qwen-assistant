@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-VOICE_TRIGGERS: list[str] = ["@bot", "@byron", "bot ơi", "trợ lý ơi"]
+VOICE_TRIGGERS: list[str] = ["@bot", "@byron", "bot ơi", "trợ lý ơi", "boss ơi"]
 VOICE_REPLY_PREFIX = "(Em nghe từ tin nhắn thoại) "
 VOICE_LOG_PREFIX = "[voice] "
 
