@@ -223,7 +223,14 @@ def test_undeclared_group_is_not_logged() -> None:
     pipeline.handle.assert_not_called()
 
 
-def test_bindgroup_endpoint_reloads_pipeline(binding_repo: InMemoryBindingsRepo) -> None:
+NINETEEN_DIGIT_GROUP_ID = "7417141469033973442"
+
+
+def test_bindgroup_endpoint_preserves_19_digit_group_id(
+    binding_repo: InMemoryBindingsRepo,
+) -> None:
+    """19-digit Zalo group IDs must survive bindgroup JSON round-trip unchanged."""
+    assert len(NINETEEN_DIGIT_GROUP_ID) == 19
     settings = _settings()
     pipeline = MessagePipeline(settings=settings, repo=binding_repo)  # type: ignore[arg-type]
 
@@ -237,7 +244,7 @@ def test_bindgroup_endpoint_reloads_pipeline(binding_repo: InMemoryBindingsRepo)
             "/zalo/bindgroup",
             headers={"X-Admin-Token": "secret-admin"},
             json={
-                "group_id": "7417141469033973442",
+                "group_id": NINETEEN_DIGIT_GROUP_ID,
                 "name": "AI_Group",
                 "group_type": "internal",
             },
@@ -245,5 +252,8 @@ def test_bindgroup_endpoint_reloads_pipeline(binding_repo: InMemoryBindingsRepo)
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    assert pipeline.is_declared_group("7417141469033973442") is True
-    assert binding_repo.list_bindings()[0]["group_type"] == "internal"
+    stored = binding_repo.list_bindings()[0]
+    assert stored["group_id"] == NINETEEN_DIGIT_GROUP_ID
+    assert isinstance(stored["group_id"], str)
+    assert pipeline.is_declared_group(NINETEEN_DIGIT_GROUP_ID) is True
+    assert stored["group_type"] == "internal"

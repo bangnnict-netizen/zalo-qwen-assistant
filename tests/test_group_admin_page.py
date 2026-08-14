@@ -73,6 +73,21 @@ def test_admin_html_unbind_disabled_for_undeclared_group() -> None:
     assert 'data-action="unbind" disabled' in html
 
 
+def test_admin_html_has_save_feedback_and_toast() -> None:
+    html = render_group_admin_page(
+        groups=[{"group_id": HOC_NHOM_ID, "name": HOC_NHOM_NAME}],
+        status_by_group={HOC_NHOM_ID: "Chưa khai báo"},
+        admin_token="secret-admin",
+        zalo_connected=True,
+    )
+
+    assert "Đang lưu..." in html
+    assert 'id="toast"' in html
+    assert "showToast" in html
+    assert "window.location.reload()" in html
+    assert "String(btn.dataset.groupId" in html
+
+
 def test_admin_html_status_badges() -> None:
     html = render_group_admin_page(
         groups=[
