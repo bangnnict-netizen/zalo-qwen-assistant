@@ -6,6 +6,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from typing import Literal
 
+import httpx
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field, field_validator
@@ -92,6 +93,48 @@ class BindGroupRequest(BaseModel):
 async def health() -> dict[str, str]:
     """Liveness probe for local checks and deployments."""
     return {"status": "ok", "service": "zalo-qwen-assistant"}
+
+
+@app.get("/health/airtable")
+async def health_airtable(x_admin_token: str | None = Header(default=None)) -> dict[str, object]:
+    """Test Airtable API connection using current env vars."""
+    _require_admin_token(x_admin_token)
+    
+    # Check if env vars are set
+    if not settings.airtable_api_key:
+        return {"status": "error", "code": 401, "reason": "AIRTABLE_API_KEY not configured"}
+    if not settings.airtable_base_id:
+        return {"status": "error", "code": 401, "reason": "AIRTABLE_BASE_ID not configured"}
+    
+    # Try a simple API call to Airtable (list records with 0 maxRecords to minimize data)
+    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
+    headers = {"Authorization": f"Bearer {settings.airtable_api_key}"}
+    params = {"maxRecords": 1}
+    
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url, headers=headers, params=params)
+            if resp.status_code >= 200 and resp.status_code < 300:
+                return {
+                    "status": "ok",
+                    "code": resp.status_code,
+                    "base_id": settings.airtable_base_id,
+                    "table": "orders"
+                }
+            else:
+                try:
+                    error_body = resp.json()
+                except Exception:
+                    error_body = resp.text
+                return {
+                    "status": "error",
+                    "code": resp.status_code,
+                    "reason": error_body
+                }
+    except httpx.TimeoutException:
+        return {"status": "error", "code": 408, "reason": "Airtable API timeout"}
+    except Exception as exc:
+        return {"status": "error", "code": 500, "reason": str(exc)}
 
 
 @app.post("/ask")
