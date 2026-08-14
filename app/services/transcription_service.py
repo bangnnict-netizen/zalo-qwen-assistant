@@ -44,21 +44,21 @@ class TranscriptionService:
                     data=data,
                 )
         except httpx.TimeoutException:
-            logger.warning("Groq transcription timed out")
+            logger.exception("Groq transcription timed out")
             return None
         except httpx.RequestError:
-            logger.warning("Groq transcription request failed")
+            logger.exception("Groq transcription request failed")
             return None
 
         if response.status_code != 200:
-            logger.warning("Groq transcription HTTP %s", response.status_code)
+            logger.warning("Groq transcription HTTP %s: %s", response.status_code, response.text)
             return None
 
         try:
             payload = response.json()
             text = payload.get("text", "")
         except ValueError:
-            logger.warning("Unexpected Groq transcription response")
+            logger.exception("Unexpected Groq transcription response")
             return None
 
         if not isinstance(text, str):

@@ -402,7 +402,14 @@ class RealZaloBridge(ZaloBridge):
 
             sender_name = getattr(message_object, "dName", "") or ""
             group_id = str(thread_id)
-            if not bridge.pipeline.is_declared_group(group_id):
+            declared = bridge.pipeline.is_declared_group(group_id)
+            # Debug: log group declaration and message type for diagnostics
+            try:
+                msg_type = getattr(message_object, "msgType", None)
+            except Exception:
+                msg_type = None
+            logger.debug("_on_message group=%s declared=%s msgType=%s", group_id, declared, msg_type)
+            if not declared:
                 return
 
             if is_voice_message(message_object):

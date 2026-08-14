@@ -61,6 +61,7 @@ async def download_voice_audio(client: Any, url: str) -> bytes | None:
     """Download voice bytes using the authenticated Zalo client session."""
     session = getattr(getattr(client, "_state", None), "_session", None)
     if session is None:
+        logger.warning("Zalo client session missing, cannot download voice from %s", url)
         return None
 
     def _fetch() -> bytes | None:
@@ -98,10 +99,17 @@ class VoiceListener:
 
         audio_bytes = await download_voice_audio(zalo_client, url)
         if not audio_bytes:
+            logger.warning("No audio bytes downloaded for voice URL %s", url)
             return None
 
-        transcript = await self.transcription.transcribe(audio_bytes)
+        try:
+            transcript = await self.transcription.transcribe(audio_bytes)
+        except Exception:
+            logger.exception("Unexpected error during transcription")
+            return None
+
         if not transcript:
+            logger.info("Transcription produced no text for voice URL %s", url)
             return None
 
         should_reply = contains_voice_trigger(transcript)
