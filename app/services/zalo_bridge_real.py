@@ -578,8 +578,22 @@ class RealZaloBridge(ZaloBridge):
             "sender_gender": "unknown",
             "text": voice_result.transcript,
         }
-        result = await self.pipeline.handle_voice(event, voice_result.question)
+        # Route the cleaned question through the pipeline and capture diagnostics
+        try:
+            record_event({"debug": "pipeline_handle_voice_start", "group_id": group_id, "question": voice_result.question[:300]})
+            result = await self.pipeline.handle_voice(event, voice_result.question)
+            record_event({"debug": "pipeline_handle_voice_result", "group_id": group_id, "result_present": result is not None, "answer_preview": (result.get('answer')[:200] if result else None)})
+        except Exception as exc:
+            record_event({"debug": "pipeline_handle_voice_exception", "group_id": group_id, "error": repr(exc)})
+            logger.exception("pipeline.handle_voice failed for group %s", group_id)
+            return
+
         if result is None:
             return
+
         answer = f"{VOICE_REPLY_PREFIX}{result['answer']}"
-        await self.send(group_id, answer)
+        try:
+            await self.send(group_id, answer)
+        except Exception:
+            # send() already records exceptions; ensure we log for this flow as well
+            record_event({"debug": "send_failed_during_voice_flow", "group_id": group_id, "answer_preview": answer[:200]})
