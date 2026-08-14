@@ -33,7 +33,56 @@ class TranscriptionService:
         """Return transcript text or None on failure."""
         if not audio_bytes:
             return None
+        import subprocess
+        import tempfile
+        import os
         headers = {"Authorization": f"Bearer {self._api_key}"}
+        # If input appears to be AAC ADTS (starts with 0xFF 0xF1/0xF9) or filename ext is .aac,
+        # attempt local conversion to m4a via ffmpeg for Groq compatibility.
+        tmp_input = None
+        tmp_output = None
+        try:
+            name, ext = os.path.splitext(filename or "")
+            is_aac_bytes = len(audio_bytes) >= 2 and audio_bytes[0:2] in (b"\xff\xf1", b"\xff\xf9")
+            if is_aac_bytes or ext.lower() in (".aac",):
+                tmp_input = tempfile.NamedTemporaryFile(delete=False, suffix=ext or ".aac")
+                tmp_input.write(audio_bytes)
+                tmp_input.flush()
+                tmp_input.close()
+                tmp_output = tempfile.NamedTemporaryFile(delete=False, suffix=".m4a")
+                tmp_output.close()
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    tmp_input.name,
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "128k",
+                    tmp_output.name,
+                ]
+                try:
+                    subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    with open(tmp_output.name, "rb") as fh:
+                        audio_bytes = fh.read()
+                    filename = os.path.basename(tmp_output.name)
+                    content_type = "audio/mp4"
+                    record_event({"debug": "ffmpeg_converted", "from_ext": ext, "to": filename})
+                except Exception as exc:
+                    record_event({"debug": "ffmpeg_failed", "error": repr(exc)})
+        finally:
+            try:
+                if tmp_input:
+                    os.unlink(tmp_input.name)
+            except Exception:
+                pass
+            try:
+                if tmp_output:
+                    os.unlink(tmp_output.name)
+            except Exception:
+                pass
+
         files = {"file": (filename, audio_bytes, content_type)}
         data = {"model": WHISPER_MODEL}
         try:
