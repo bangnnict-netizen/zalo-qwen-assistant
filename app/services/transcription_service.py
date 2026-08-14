@@ -7,6 +7,7 @@ import logging
 import httpx
 
 from app.config import Settings, get_settings
+from app.core.debug_events import record_event
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +44,39 @@ class TranscriptionService:
                     files=files,
                     data=data,
                 )
+                # record request metadata
+                record_event(
+                    {
+                        "debug": "groq_request",
+                        "url": GROQ_TRANSCRIPTION_URL,
+                        "model": WHISPER_MODEL,
+                        "file_name": filename,
+                        "content_type": content_type,
+                    }
+                )
         except httpx.TimeoutException:
             logger.exception("Groq transcription timed out")
+            record_event({"debug": "groq_timeout", "url": GROQ_TRANSCRIPTION_URL})
             return None
         except httpx.RequestError:
             logger.exception("Groq transcription request failed")
+            record_event({"debug": "groq_request_error", "url": GROQ_TRANSCRIPTION_URL})
             return None
 
         if response.status_code != 200:
+            # record full response body for diagnostics
+            try:
+                body = response.text
+            except Exception:
+                body = None
+            record_event(
+                {
+                    "debug": "groq_non_200",
+                    "status": response.status_code,
+                    "body": body,
+                    "url": GROQ_TRANSCRIPTION_URL,
+                }
+            )
             logger.warning("Groq transcription HTTP %s: %s", response.status_code, response.text)
             return None
 

@@ -9,6 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.services.transcription_service import TranscriptionService
+from app.core.debug_events import record_event
+from urllib.parse import urlparse
+import os
 from app.services.voice_triggers import (
     contains_voice_trigger,
     strip_voice_triggers,
@@ -67,10 +70,30 @@ async def download_voice_audio(client: Any, url: str) -> bytes | None:
     def _fetch() -> bytes | None:
         try:
             with session.get(url) as response:
+                try:
+                    content = response.content
+                    status = response.status_code
+                    ctype = response.headers.get("Content-Type")
+                    path = urlparse(url).path or ""
+                    ext = os.path.splitext(path)[1].lower()
+                    record_event(
+                        {
+                            "debug": "voice_download",
+                            "url": url,
+                            "status": status,
+                            "content_type": ctype,
+                            "bytes": len(content) if content is not None else 0,
+                            "ext": ext,
+                        }
+                    )
+                except Exception:
+                    # best-effort record
+                    record_event({"debug": "voice_download_meta_failed", "url": url})
                 if response.status_code == 200:
-                    return response.content
+                    return content
         except Exception:
             logger.warning("Failed to download Zalo voice from %s", url, exc_info=True)
+            record_event({"debug": "voice_download_exception", "url": url, "error": repr(Exception)})
             return None
         return None
 
