@@ -74,7 +74,7 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
         logger.warning("create_lead_via_airtable: AIRTABLE_API_KEY or AIRTABLE_BASE_ID not configured")
         return None
     
-    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/Leads"
+    url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/leads"
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}", "Content-Type": "application/json"}
     payload = {"fields": {"Name": lead.get("name"), "Phone": lead.get("phone"), "Need": lead.get("need"), "Source": lead.get("source_group"), "Status": "new"}}
     
