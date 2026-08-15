@@ -68,6 +68,8 @@ class MessagePipeline:
         group_id = str(event.get("group_id", ""))
         sender_gender = str(event.get("sender_gender", "unknown"))
         sender_id = str(event.get("sender_id", ""))
+        
+        logger.debug(f"MessagePipeline.handle: text='{text}', group_id='{group_id}', sender_id='{sender_id}'")
 
         # ADMIN command: /tomtat [hours]
         if text.strip().lower().startswith("/tomtat"):
@@ -99,6 +101,7 @@ class MessagePipeline:
 
         # Order lookup: detect order codes like DH1001 or "đơn DH1001"
         order_match = re.search(r"\b(?:dh|đh)\s*0*(\d+)\b", text, re.IGNORECASE)
+        logger.debug(f"Order detection regex: text='{text}', match={order_match}")
         if order_match:
             order_id = order_match.group(1)
             logger.info(f"Order lookup: detected order_id={order_id} in text='{text}'")

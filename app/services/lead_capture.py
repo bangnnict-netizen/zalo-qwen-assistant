@@ -99,9 +99,11 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
 
 async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
     """Query Airtable `orders` table by order_id. Returns fields dict or None."""
+    logger.info(f"get_order_from_airtable: CALLED with order_id={order_id}")
+    
     settings = get_settings()
     if not settings.airtable_api_key or not settings.airtable_base_id:
-        logger.warning("get_order_from_airtable: AIRTABLE_API_KEY or AIRTABLE_BASE_ID not configured")
+        logger.warning(f"get_order_from_airtable: AIRTABLE_API_KEY or AIRTABLE_BASE_ID not configured (api_key={bool(settings.airtable_api_key)}, base_id={bool(settings.airtable_base_id)})")
         return None
     
     url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
