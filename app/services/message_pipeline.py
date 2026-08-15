@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 from datetime import datetime, timedelta, timezone
@@ -11,6 +12,8 @@ from app.repositories.supabase_repo import SupabaseRepo
 from app.services.group_bindings import GroupBindingRegistry
 from app.services.router_service import MessageRouter
 from app.services.lead_capture import PendingLeadRegistry, create_lead_via_airtable
+
+logger = logging.getLogger(__name__)
 
 
 def _tag_patterns(tags: list[str]) -> list[re.Pattern[str]]:
@@ -98,15 +101,19 @@ class MessagePipeline:
         order_match = re.search(r"\b(?:dh|đh)\s*0*(\d+)\b", text, re.IGNORECASE)
         if order_match:
             order_id = order_match.group(1)
+            logger.info(f"Order lookup: detected order_id={order_id} in text='{text}'")
             try:
                 from app.services.lead_capture import get_order_from_airtable
 
                 order = await get_order_from_airtable(order_id)
                 if order:
                     answer = f"Đơn {order_id}: status={order.get('status')}, received_at={order.get('received_at')}, note={order.get('note','')}"
+                    logger.info(f"Order lookup: found order {order_id}: {order}")
                 else:
                     answer = "Em chưa tìm thấy mã đơn. Vui lòng kiểm tra lại mã đơn."
-            except Exception:
+                    logger.info(f"Order lookup: no order found for order_id={order_id}")
+            except Exception as exc:
+                logger.exception(f"Order lookup: exception for order_id={order_id}: {exc}")
                 answer = "Em không truy xuất được dữ liệu đơn lúc này."
             return {"answer": answer, "model_used": None, "sources": []}
 
@@ -114,15 +121,19 @@ class MessagePipeline:
         if self._resolve_group_type(group_id) == "customer":
             if re.search(r"giá|báo giá|bao nhiêu|hợp đồng", text, re.IGNORECASE):
                 # set pending lead
+                logger.info(f"Lead capture: price/quote intent detected for sender_id={sender_id}, group_id={group_id}, text='{text}'")
                 await self.lead_registry.set_pending(group_id, sender_id, need=text)
                 return {"answer": "Em xin tên + số điện thoại để bộ phận kinh doanh liên hệ ạ.", "model_used": None, "sources": []}
             # check if pending and message contains phone
             pending_lead = await self.lead_registry.pop_if_phone(group_id, sender_id, text)
             if pending_lead:
+                logger.info(f"Lead capture: phone detected for sender_id={sender_id}, pending_lead={pending_lead}")
                 # create via airtable
                 created = await create_lead_via_airtable(pending_lead)
                 if created is not None:
+                    logger.info(f"Lead capture: lead created in Airtable: {created}")
                     return {"answer": "Em đã ghi nhận, nhân viên sẽ gọi lại ạ.", "model_used": None, "sources": []}
+                logger.warning(f"Lead capture: failed to create lead in Airtable for {pending_lead}")
                 return {"answer": "Em chưa lưu được thông tin lúc này, bạn thử lại sau nhé.", "model_used": None, "sources": []}
 
         group_type = self._resolve_group_type(group_id)
