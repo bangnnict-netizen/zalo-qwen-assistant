@@ -435,6 +435,12 @@ class RealZaloBridge(ZaloBridge):
                 }
             )
 
+            own_uid = getattr(bridge._client, "uid", None)
+            if own_uid is not None and str(author_id) == str(own_uid):
+                # Ignore the bot's own outgoing messages to avoid replying to itself
+                # (e.g. an order-lookup reply containing "DHxxxx" re-triggers lookup).
+                return
+
             sender_name = getattr(message_object, "dName", "") or ""
             group_id = str(thread_id)
             declared = bridge.pipeline.is_declared_group(group_id)

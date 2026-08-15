@@ -94,6 +94,33 @@ async def test_group_messages_are_logged() -> None:
 
 
 @pytest.mark.asyncio
+async def test_own_outgoing_messages_are_ignored() -> None:
+    """Regression: bot's own replies (e.g. containing 'DHxxxx') must not re-trigger itself."""
+    bridge = _bridge()
+    client = MagicMock()
+    client.uid = "bot_own_uid"
+    bridge._client = client
+    bridge._bind_message_handler()
+
+    with (
+        patch("zlapi.models.ThreadType", FakeThreadType),
+        patch("app.services.zalo_bridge_real.asyncio.run") as run_mock,
+    ):
+        handler = client.onMessage
+        handler(
+            "mid",
+            "bot_own_uid",
+            "Đơn DH1001: status=Đang chiếu xạ",
+            MagicMock(dName="Byron"),
+            "group_internal_demo",
+            FakeThreadType.GROUP,
+        )
+
+    bridge.repo.log_message.assert_not_called()
+    run_mock.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_undeclared_group_messages_are_silent() -> None:
     bridge = _bridge()
     bridge.pipeline.is_declared_group.return_value = False
