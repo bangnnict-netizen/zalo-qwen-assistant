@@ -76,7 +76,7 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
     
     url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/leads"
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}", "Content-Type": "application/json"}
-    payload = {"fields": {"Name": lead.get("name"), "Phone": lead.get("phone"), "Need": lead.get("need"), "Source": lead.get("source_group"), "Status": "new"}}
+    payload = {"fields": {"name": lead.get("name"), "phone": lead.get("phone"), "need": lead.get("need"), "source": lead.get("source_group"), "status": "new"}}
     
     logger.info(f"create_lead_via_airtable: POST {url}")
     logger.info(f"create_lead_via_airtable: payload={payload}")
