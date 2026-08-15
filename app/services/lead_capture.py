@@ -78,17 +78,19 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}", "Content-Type": "application/json"}
     payload = {"fields": {"Name": lead.get("name"), "Phone": lead.get("phone"), "Need": lead.get("need"), "Source": lead.get("source_group"), "Status": "new"}}
     
-    logger.info(f"create_lead_via_airtable: POST {url} with payload={payload}")
+    logger.info(f"create_lead_via_airtable: POST {url}")
+    logger.info(f"create_lead_via_airtable: payload={payload}")
     
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.post(url, headers=headers, json=payload)
-            logger.info(f"create_lead_via_airtable: HTTP {resp.status_code} response: {resp.text[:500]}")
+            logger.info(f"create_lead_via_airtable: HTTP {resp.status_code}")
+            logger.info(f"create_lead_via_airtable: response_body={resp.text}")
             
             if resp.status_code >= 200 and resp.status_code < 300:
                 return resp.json()
             else:
-                logger.error(f"create_lead_via_airtable: HTTP {resp.status_code} error: {resp.text}")
+                logger.error(f"create_lead_via_airtable: HTTP {resp.status_code} - Full error: {resp.text}")
     except Exception as exc:
         logger.exception(f"create_lead_via_airtable: Exception: {exc}")
         return None
@@ -106,12 +108,14 @@ async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}"}
     params = {"filterByFormula": f"{{order_id}}='{order_id}'", "maxRecords": 1}
     
-    logger.info(f"get_order_from_airtable: GET {url} with params={params}")
+    logger.info(f"get_order_from_airtable: GET {url}")
+    logger.info(f"get_order_from_airtable: params={params}")
     
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(url, headers=headers, params=params)
-            logger.info(f"get_order_from_airtable: HTTP {resp.status_code} response: {resp.text[:500]}")
+            logger.info(f"get_order_from_airtable: HTTP {resp.status_code}")
+            logger.info(f"get_order_from_airtable: response_body={resp.text}")
             
             if resp.status_code >= 200 and resp.status_code < 300:
                 body = resp.json()
@@ -128,7 +132,7 @@ async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
                     "note": fields.get("note"),
                 }
             else:
-                logger.error(f"get_order_from_airtable: HTTP {resp.status_code} error: {resp.text}")
+                logger.error(f"get_order_from_airtable: HTTP {resp.status_code} - Full error: {resp.text}")
     except Exception as exc:
         logger.exception(f"get_order_from_airtable: Exception: {exc}")
         return None
