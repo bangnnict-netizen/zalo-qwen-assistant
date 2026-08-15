@@ -99,11 +99,12 @@ async def create_lead_via_airtable(lead: dict[str, Any]) -> dict[str, Any] | Non
 
 async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
     """Query Airtable `orders` table by order_id. Returns fields dict or None."""
-    logger.info(f"get_order_from_airtable: CALLED with order_id={order_id}")
+    logger.info(f">>> get_order_from_airtable: CALLED with order_id={order_id}")
     
     settings = get_settings()
     if not settings.airtable_api_key or not settings.airtable_base_id:
-        logger.warning(f"get_order_from_airtable: AIRTABLE_API_KEY or AIRTABLE_BASE_ID not configured (api_key={bool(settings.airtable_api_key)}, base_id={bool(settings.airtable_base_id)})")
+        logger.warning(f">>> get_order_from_airtable: AIRTABLE_API_KEY or AIRTABLE_BASE_ID not configured (api_key={bool(settings.airtable_api_key)}, base_id={bool(settings.airtable_base_id)})")
+        logger.warning(f">>> get_order_from_airtable: Returning None due to missing config")
         return None
     
     url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
@@ -125,10 +126,10 @@ async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
                 body = resp.json()
                 records = body.get("records") or []
                 if not records:
-                    logger.info(f"get_order_from_airtable: No records found for order_id={order_id}")
+                    logger.info(f">>> get_order_from_airtable: No records found for order_id={order_id}")
                     return None
                 fields = records[0].get("fields", {})
-                logger.info(f"get_order_from_airtable: Found order {order_id}: {fields}")
+                logger.info(f">>> get_order_from_airtable: FOUND order {order_id}: {fields}")
                 # normalize to expected keys
                 return {
                     "status": fields.get("status"),

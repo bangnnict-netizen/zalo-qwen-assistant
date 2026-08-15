@@ -69,7 +69,7 @@ class MessagePipeline:
         sender_gender = str(event.get("sender_gender", "unknown"))
         sender_id = str(event.get("sender_id", ""))
         
-        logger.debug(f"MessagePipeline.handle: text='{text}', group_id='{group_id}', sender_id='{sender_id}'")
+        logger.info(f"RAW MESSAGE: group={group_id}, sender={sender_id}, text='{text}'")
 
         # ADMIN command: /tomtat [hours]
         if text.strip().lower().startswith("/tomtat"):
@@ -100,10 +100,10 @@ class MessagePipeline:
             return None
 
         # Order lookup: detect order codes like DH1001 or "đơn DH1001"
-        order_match = re.search(r"\b(?:dh|đh)\s*0*(\d+)\b", text, re.IGNORECASE)
-        logger.debug(f"Order detection regex: text='{text}', match={order_match}")
+        order_match = re.search(r"DH(\d+)", text, re.IGNORECASE)
         if order_match:
             order_id = order_match.group(1)
+            logger.info(f"Order detection: matched DH with order_id={order_id}")
             logger.info(f"Order lookup: detected order_id={order_id} in text='{text}'")
             try:
                 from app.services.lead_capture import get_order_from_airtable
