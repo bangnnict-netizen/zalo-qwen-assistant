@@ -106,10 +106,12 @@ async def get_order_from_airtable(order_id: str) -> dict[str, Any] | None:
     
     url = f"https://api.airtable.com/v0/{settings.airtable_base_id}/orders"
     headers = {"Authorization": f"Bearer {settings.airtable_api_key}"}
-    params = {"filterByFormula": f"{{order_id}}='{order_id}'", "maxRecords": 1}
+    filter_formula = f"{{order_id}}='{order_id}'"
+    params = {"filterByFormula": filter_formula, "maxRecords": 1}
     
     logger.info(f"get_order_from_airtable: GET {url}")
-    logger.info(f"get_order_from_airtable: params={params}")
+    logger.info(f"get_order_from_airtable: filter_formula={filter_formula}")
+    logger.info(f"get_order_from_airtable: order_id={order_id}")
     
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
