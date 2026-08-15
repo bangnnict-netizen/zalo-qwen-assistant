@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -195,6 +195,29 @@ async def test_internal_male_uses_anh_honorific() -> None:
         question="mấy giờ nhà máy nghỉ làm?",
         honorific="anh",
     )
+
+
+@pytest.mark.asyncio
+async def test_order_lookup_queries_full_code_with_prefix() -> None:
+    """Regression: order_id passed to Airtable must include the 'DH' prefix, not just digits."""
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    with patch(
+        "app.services.lead_capture.get_order_from_airtable",
+        new=AsyncMock(return_value={"status": "Đang chiếu xạ", "received_at": "2026-08-01", "note": ""}),
+    ) as mock_get_order:
+        result = await pipeline.handle(
+            {
+                "group_id": "group_internal_demo",
+                "sender_gender": "male",
+                "text": "DH1001",
+            }
+        )
+
+    mock_get_order.assert_awaited_once_with("DH1001")
+    assert result is not None
+    assert "Đang chiếu xạ" in result["answer"]
 
 
 @pytest.mark.asyncio

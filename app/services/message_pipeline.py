@@ -100,9 +100,9 @@ class MessagePipeline:
             return None
 
         # Order lookup: detect order codes like DH1001 or "đơn DH1001"
-        order_match = re.search(r"DH(\d+)", text, re.IGNORECASE)
+        order_match = re.search(r"DH\d+", text, re.IGNORECASE)
         if order_match:
-            order_id = order_match.group(1)
+            order_id = order_match.group(0).upper()
             logger.info(f"Order detection: matched DH with order_id={order_id}")
             logger.info(f"Order lookup: detected order_id={order_id} in text='{text}'")
             try:
