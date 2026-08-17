@@ -389,6 +389,44 @@ async def test_consultation_reply_no_match_falls_back_to_contact() -> None:
 
 
 @pytest.mark.asyncio
+async def test_consultation_reply_with_bot_tag_still_falls_back_to_contact() -> None:
+    """Regression: a tagged reply to 'muốn tư vấn gì ạ?' must still go to contact capture,
+    not the free-form LLM flow, even though it contains a bot tag."""
+    from app.services.message_pipeline import CONTACT_REQUEST_MSG
+
+    router = AsyncMock(spec=MessageRouter)
+    router.route.return_value = {
+        "answer": "câu trả lời tự do",
+        "model_used": "test-model",
+        "sources": [],
+    }
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    res1 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "tư vấn",
+        }
+    )
+    assert res1 is not None
+
+    res2 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "@Byron em muốn hỏi thêm chút",
+        }
+    )
+
+    assert res2 is not None
+    assert res2["answer"] == CONTACT_REQUEST_MSG
+    router.route.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_tuvan_with_extra_text_not_matched() -> None:
     router = AsyncMock(spec=MessageRouter)
     pipeline = MessagePipeline(router=router, settings=_settings())
@@ -404,6 +442,29 @@ async def test_tuvan_with_extra_text_not_matched() -> None:
 
     assert result is not None
     assert "Công ty" in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_technical_question_no_tag_still_routed() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    router.rag = MagicMock()
+    router.rag.search.return_value = [{"heading": "Tech", "content": "Gamma"}]
+    router.llm = AsyncMock()
+    router.llm.chat.return_value = {"answer": "Công nghệ Gamma", "model_used": "test"}
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "bên em chiếu xạ công nghệ gì vậy?",
+        }
+    )
+
+    assert result is not None
+    assert "Công nghệ Gamma" in result["answer"]
+    router.llm.chat.assert_awaited_once()
 
 
 @pytest.mark.asyncio

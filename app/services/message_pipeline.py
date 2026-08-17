@@ -46,7 +46,8 @@ COMPANY_INFO_RE = re.compile(
 )
 TECHNICAL_RE = re.compile(
     r"liều chiếu xạ|liều lượng|thời gian chiếu xạ|mất bao lâu|quy trình chiếu xạ|"
-    r"quy trình gửi hàng",
+    r"quy trình gửi hàng|công nghệ chiếu xạ|công nghệ|nguyên lý|cơ chế|cobalt|"
+    r"gamma|co-60|co60|an toàn bức xạ|tiêu chuẩn chiếu xạ",
     re.IGNORECASE,
 )
 TAVILY_DISCLAIMER = (
@@ -254,7 +255,10 @@ class MessagePipeline:
             await self.lead_registry.set_consultation_pending(group_id, sender_id)
             return {"answer": CONSULTATION_PROMPT, "model_used": None, "sources": []}
 
-        # 2.6 — fall through, unless this was a consultation reply with no other match
+        # 2.6 — consultation reply that matched nothing above: fall back to contact capture.
+        # (Deliberately checked before any bot-tag handling: a tagged reply to "muốn tư vấn
+        # gì ạ?" must still follow the contact-capture fallback, not the free-form LLM flow.
+        # The tag+LLM fallback itself lives in handle() below — do not duplicate it here.)
         if was_consultation_reply:
             logger.info(
                 "Consultation reply with no intent match for sender_id=%s, falling back to contact",
@@ -272,8 +276,9 @@ class MessagePipeline:
                 f"### {item['heading']}\n{item['content']}" for item in sources
             )
             system = (
-                "Bạn là trợ lý khách hàng của công ty chiếu xạ. "
-                "Trả lời câu hỏi dựa trên tài liệu nội bộ sau, ngắn gọn và chính xác:\n\n"
+                "Bạn là trợ lý khách hàng. Giao tiếp như tin nhắn Zalo: cực kỳ ngắn gọn, "
+                "đúng trọng tâm (2-4 câu). CHỈ trả lời đúng phần khách hỏi, KHÔNG liệt kê thông "
+                "tin ngoài phạm vi câu hỏi. Xưng 'em', gọi 'anh/chị'.\n\n"
                 f"{docs}"
             )
         else:
@@ -284,16 +289,17 @@ class MessagePipeline:
                     for item in web_results
                 )
                 system = (
-                    "Bạn là trợ lý khách hàng của công ty chiếu xạ. "
-                    "Trả lời câu hỏi dựa trên kết quả tìm kiếm web sau. "
-                    f"BẮT BUỘC mở đầu câu trả lời bằng dòng chính xác:\n{TAVILY_DISCLAIMER}\n\n"
+                    "Bạn là trợ lý khách hàng. Giao tiếp như tin nhắn Zalo: cực kỳ ngắn gọn, "
+                    "đúng trọng tâm (2-4 câu). CHỈ trả lời đúng phần khách hỏi, KHÔNG liệt kê thông "
+                    "tin ngoài phạm vi câu hỏi. Xưng 'em', gọi 'anh/chị'.\n"
+                    f"BẮT BUỘC mở đầu bằng:\n{TAVILY_DISCLAIMER}\n\n"
                     f"{docs}"
                 )
                 sources = web_results
             else:
                 system = (
-                    "Bạn là trợ lý khách hàng của công ty chiếu xạ. "
-                    "Trả lời câu hỏi kỹ thuật nếu có thể; nếu không chắc, hướng dẫn liên hệ hotline."
+                    "Bạn là trợ lý khách hàng. Giao tiếp như tin nhắn Zalo: ngắn gọn, đúng trọng tâm. "
+                    "Trả lời câu hỏi kỹ thuật nếu biết, nếu không chắc hướng dẫn liên hệ hotline."
                 )
 
         llm_resp = await self.router.llm.chat(text, system=system)
