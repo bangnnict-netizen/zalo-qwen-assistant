@@ -468,6 +468,74 @@ async def test_technical_question_no_tag_still_routed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_technical_question_with_bao_nhieu_not_contact_intent() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    router.rag = MagicMock()
+    router.rag.search.return_value = [{"heading": "Liều", "content": "10kGy"}]
+    router.llm = AsyncMock()
+    router.llm.chat.return_value = {"answer": "Liều 10kGy", "model_used": "test"}
+    pipeline = MessagePipeline(router=router, settings=_settings())
+    
+    # "liều bao nhiêu" nên vào nhánh kỹ thuật
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "Liều chiếu cho cá fillet đông lạnh thì chiếu liều bao nhiêu?",
+        }
+    )
+    
+    print(f"DEBUG: result={result}")
+    assert result is not None
+    assert "Liều 10kGy" in result["answer"]
+    router.llm.chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_contact_intent_with_bao_nhieu_price_context() -> None:
+    from app.services.message_pipeline import CONTACT_REQUEST_MSG
+
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "chiếu 500kg tôm bao nhiêu tiền?",
+        }
+    )
+
+    assert result is not None
+    assert CONTACT_REQUEST_MSG in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_technical_question_time_bao_nhieu_not_contact_intent() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    router.rag = MagicMock()
+    router.rag.search.return_value = [{"heading": "Time", "content": "2h"}]
+    router.llm = AsyncMock()
+    router.llm.chat.return_value = {"answer": "2h", "model_used": "test"}
+    pipeline = MessagePipeline(router=router, settings=_settings())
+    
+    # "bao nhiêu thời gian" khớp với từ khóa "thời gian" trong TECHNICAL_RE
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "mất bao nhiêu thời gian để chiếu xong?",
+        }
+    )
+
+    assert result is not None
+    assert "2h" in result["answer"]
+    router.llm.chat.assert_awaited_once()
+
+@pytest.mark.asyncio
 async def test_technical_rag_hit_no_tavily() -> None:
     router = AsyncMock(spec=MessageRouter)
     router.rag = MagicMock()

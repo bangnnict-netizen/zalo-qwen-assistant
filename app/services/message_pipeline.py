@@ -17,11 +17,13 @@ from app.services.search_service import tavily_search
 logger = logging.getLogger(__name__)
 
 CONTACT_REQUEST_MSG = (
-    "Dạ, anh/chị vui lòng cho em xin thông tin liên hệ để nhân viên bên em liên lạc "
-    "để tư vấn dịch vụ ạ.\n"
-    "1. Công ty\n"
-    "2. Số điện thoại\n"
-    "3. Tên liên hệ"
+    "Dạ em cảm ơn anh/chị đã quan tâm đến dịch vụ Công ty bên em.\n"
+    "Do giá chiếu còn phụ thuộc thêm nhiều yếu tố khác vì vậy anh/chị cho em xin thêm thông tin:\n"
+    "1. Tên Công ty\n"
+    "2. Số điện thoại liên hệ\n"
+    "3. Tên người liên hệ\n"
+    "Để em chuyển thông tin cho Phòng kinh doanh liên hệ trao đổi cụ thể với mình hơn ạ\n"
+    "Em cảm ơn anh/chị!"
 )
 COMPANY_INFO_REPLY = (
     "Dạ, thông tin Công ty ạ:\n"
@@ -34,20 +36,31 @@ CONSULTATION_PROMPT = "Dạ, anh/chị muốn tư vấn về vấn đề gì ạ
 LEAD_SUCCESS_REPLY = "Dạ em đã ghi nhận thông tin, nhân viên bên em sẽ liên hệ sớm ạ."
 LEAD_FAIL_REPLY = "Dạ em chưa lưu được thông tin lúc này, anh/chị vui lòng thử lại sau ạ."
 
-CONTACT_INTENT_RE = re.compile(
+CONTACT_KEYWORDS_RE = re.compile(
     r"liên hệ|muốn liên hệ|kết nối|gọi cho tôi|gọi cho em|liên hệ chiếu xạ|"
-    r"giá|báo giá|bao nhiêu|hợp đồng",
+    r"giá|báo giá|hợp đồng",
     re.IGNORECASE,
 )
+BAO_NHIEU_RE = re.compile(r"bao nhiêu", re.IGNORECASE)
+PRICE_CONTEXT_RE = re.compile(r"giá|tiền|kg|ký|kilogram|tấn", re.IGNORECASE)
+
+
+def _is_contact_intent(text: str) -> bool:
+    """Contact/quote intent: explicit keywords, OR 'bao nhiêu' combined with a price/weight
+    context word (tiền/kg/tấn...) — bare 'bao nhiêu' alone (e.g. technical dosage questions
+    like 'liều bao nhiêu') must NOT trigger this."""
+    if CONTACT_KEYWORDS_RE.search(text):
+        return True
+    return bool(BAO_NHIEU_RE.search(text) and PRICE_CONTEXT_RE.search(text))
 COMPANY_INFO_RE = re.compile(
     r"địa chỉ công ty|địa chỉ cty|mã số thuế|\bmst\b|hotline|thông tin công ty|"
     r"công ty ở đâu|số điện thoại công ty",
     re.IGNORECASE,
 )
 TECHNICAL_RE = re.compile(
-    r"liều chiếu xạ|liều lượng|thời gian chiếu xạ|mất bao lâu|quy trình chiếu xạ|"
-    r"quy trình gửi hàng|công nghệ chiếu xạ|công nghệ|nguyên lý|cơ chế|cobalt|"
-    r"gamma|co-60|co60|an toàn bức xạ|tiêu chuẩn chiếu xạ",
+    r"liều.*chiếu|chiếu.*liều|liều lượng|thời gian.*chiếu|mất bao (lâu|nhiêu)|"
+    r"quy trình chiếu xạ|quy trình gửi hàng|công nghệ chiếu xạ|công nghệ|nguyên lý|cơ chế|"
+    r"cobalt|gamma|co-60|co60|an toàn bức xạ|tiêu chuẩn chiếu xạ",
     re.IGNORECASE,
 )
 TAVILY_DISCLAIMER = (
@@ -231,8 +244,12 @@ class MessagePipeline:
         if was_consultation_reply:
             logger.info("Consultation pending cleared for sender_id=%s, re-classifying", sender_id)
 
-        # 2.2 — contact / price intent (merged)
-        if CONTACT_INTENT_RE.search(text):
+        # 2.2 — technical questions (RAG → Tavily fallback → LLM) (Run before contact intent)
+        if TECHNICAL_RE.search(text):
+            return await self._handle_technical_question(text)
+
+        # 2.3 — contact / price intent (merged)
+        if _is_contact_intent(text):
             logger.info(
                 "Lead capture: contact intent for sender_id=%s, group_id=%s, text='%s'",
                 sender_id,
@@ -242,13 +259,9 @@ class MessagePipeline:
             await self.lead_registry.set_contact_pending(group_id, sender_id, need=text)
             return {"answer": CONTACT_REQUEST_MSG, "model_used": None, "sources": []}
 
-        # 2.3 — company info (fixed reply, no LLM)
+        # 2.4 — company info (fixed reply, no LLM)
         if COMPANY_INFO_RE.search(text):
             return {"answer": COMPANY_INFO_REPLY, "model_used": None, "sources": []}
-
-        # 2.4 — technical questions (RAG → Tavily fallback → LLM)
-        if TECHNICAL_RE.search(text):
-            return await self._handle_technical_question(text)
 
         # 2.5 — only "tư vấn"
         if _is_only_tuvan(text):
