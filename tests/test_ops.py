@@ -57,23 +57,29 @@ async def test_lead_capture_flow() -> None:
     router = MagicMock()
     pipeline = MessagePipeline(router=router, settings=settings, repo=repo)
 
-    # Step 1: customer asks for price
+    # Step 1: customer asks for price (merged into contact flow)
     event1 = {"group_id": "group_customer_demo", "sender_id": "u1", "text": "Giá bao nhiêu?"}
     res1 = await pipeline.handle(event1)
     assert res1 is not None
-    assert "số điện thoại" in res1["answer"]
+    assert "Công ty" in res1["answer"]
+    assert "Số điện thoại" in res1["answer"]
     # Pending should exist
     assert await pipeline.lead_registry.has_pending("group_customer_demo", "u1")
 
-    # Step 2: customer sends phone number
-    # patch Airtable creation to avoid network
-    from unittest.mock import AsyncMock
+    # Step 2: customer sends contact info (numbered format)
     with patch("app.services.message_pipeline.create_lead_via_airtable", new=AsyncMock(return_value={"id": "rec1"})) as mock_create:
-        event2 = {"group_id": "group_customer_demo", "sender_id": "u1", "text": "SĐT 0987654321"}
+        event2 = {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "text": "1. CTY Test\n2. 0987654321\n3. Nguyễn A",
+        }
         res2 = await pipeline.handle(event2)
         assert res2 is not None
         assert "ghi nhận" in res2["answer"]
         mock_create.assert_awaited_once()
+        lead = mock_create.await_args.args[0]
+        assert lead["company"] == "CTY Test"
+        assert lead["phone"] == "0987654321"
 
 
 @pytest.mark.asyncio

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -234,7 +234,7 @@ async def test_customer_female_uses_chi_honorific() -> None:
         {
             "group_id": "group_customer_demo",
             "sender_gender": "female",
-            "text": "@bot gửi hàng chiếu xạ mất bao lâu?",
+            "text": "@bot xin chào, cần hỗ trợ",
         }
     )
 
@@ -242,6 +242,222 @@ async def test_customer_female_uses_chi_honorific() -> None:
     assert result["honorific"] == "chị"
     router.route.assert_awaited_once_with(
         group_type="customer",
-        question="gửi hàng chiếu xạ mất bao lâu?",
+        question="xin chào, cần hỗ trợ",
         honorific="chị",
     )
+
+
+@pytest.mark.asyncio
+async def test_company_info_fixed_reply_no_llm() -> None:
+    router = MagicMock(spec=MessageRouter)
+    router.llm = AsyncMock()
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "Cho em xin địa chỉ công ty",
+        }
+    )
+
+    assert result is not None
+    assert "CÔNG TY CỔ PHẦN CHIẾU XẠ CẦN THƠ" in result["answer"]
+    assert "1801710194" in result["answer"]
+    router.llm.chat.assert_not_called()
+    router.route.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_contact_intent_sets_pending_and_creates_lead_with_company() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    res1 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "Em muốn liên hệ chiếu xạ",
+        }
+    )
+    assert res1 is not None
+    assert "Công ty" in res1["answer"]
+    assert "Số điện thoại" in res1["answer"]
+    assert await pipeline.lead_registry.has_pending("group_customer_demo", "u1")
+
+    with patch(
+        "app.services.message_pipeline.create_lead_via_airtable",
+        new=AsyncMock(return_value={"id": "rec1"}),
+    ) as mock_create:
+        res2 = await pipeline.handle(
+            {
+                "group_id": "group_customer_demo",
+                "sender_id": "u1",
+                "sender_gender": "male",
+                "text": "1. CTY Demo\n2. 0987654321\n3. Trần A",
+            }
+        )
+
+    assert res2 is not None
+    assert "ghi nhận" in res2["answer"]
+    mock_create.assert_awaited_once()
+    lead_arg = mock_create.await_args.args[0]
+    assert lead_arg["company"] == "CTY Demo"
+    assert lead_arg["phone"] == "0987654321"
+    assert lead_arg["name"] == "Trần A"
+
+
+@pytest.mark.asyncio
+async def test_price_intent_merged_into_contact_flow() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "Giá bao nhiêu?",
+        }
+    )
+
+    assert result is not None
+    assert "Công ty" in result["answer"]
+    assert await pipeline.lead_registry.has_pending("group_customer_demo", "u1")
+
+
+@pytest.mark.asyncio
+async def test_only_tuvan_prompts_and_reclassifies() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    res1 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "tư vấn",
+        }
+    )
+    assert res1 is not None
+    assert res1["answer"] == "Dạ, anh/chị muốn tư vấn về vấn đề gì ạ?"
+
+    res2 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "Cho em xin địa chỉ công ty",
+        }
+    )
+    assert res2 is not None
+    assert "CÔNG TY CỔ PHẦN CHIẾU XẠ CẦN THƠ" in res2["answer"]
+
+
+@pytest.mark.asyncio
+async def test_consultation_reply_no_match_falls_back_to_contact() -> None:
+    from app.services.message_pipeline import CONTACT_REQUEST_MSG
+
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    res1 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "tư vấn",
+        }
+    )
+    assert res1 is not None
+    assert res1["answer"] == "Dạ, anh/chị muốn tư vấn về vấn đề gì ạ?"
+
+    res2 = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "em muốn hỏi về dịch vụ đóng gói",
+        }
+    )
+
+    assert res2 is not None
+    assert res2["answer"] == CONTACT_REQUEST_MSG
+    assert await pipeline.lead_registry.has_pending("group_customer_demo", "u1")
+
+
+@pytest.mark.asyncio
+async def test_tuvan_with_extra_text_not_matched() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    result = await pipeline.handle(
+        {
+            "group_id": "group_customer_demo",
+            "sender_id": "u1",
+            "sender_gender": "male",
+            "text": "em muốn tư vấn về giá",
+        }
+    )
+
+    assert result is not None
+    assert "Công ty" in result["answer"]
+
+
+@pytest.mark.asyncio
+async def test_technical_rag_hit_no_tavily() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    router.rag = MagicMock()
+    router.rag.search.return_value = [{"heading": "Liều", "content": "10-25 kGy"}]
+    router.llm = AsyncMock()
+    router.llm.chat.return_value = {"answer": "Liều tiêu chuẩn 10-25 kGy", "model_used": "test"}
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    with patch("app.services.message_pipeline.tavily_search", new=AsyncMock()) as mock_tavily:
+        result = await pipeline.handle(
+            {
+                "group_id": "group_customer_demo",
+                "sender_id": "u1",
+                "sender_gender": "male",
+                "text": "Cho em hỏi về liều chiếu xạ thực phẩm",
+            }
+        )
+
+    assert result is not None
+    assert "10-25 kGy" in result["answer"]
+    mock_tavily.assert_not_called()
+    router.llm.chat.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_technical_rag_empty_calls_tavily() -> None:
+    router = AsyncMock(spec=MessageRouter)
+    router.rag = MagicMock()
+    router.rag.search.return_value = []
+    router.llm = AsyncMock()
+    router.llm.chat.return_value = {
+        "answer": "⚠️ Thông tin mang tính chất tham khảo, chưa được công ty xác nhận chính thức:\n\nNguồn web",
+        "model_used": "test",
+    }
+    pipeline = MessagePipeline(router=router, settings=_settings())
+
+    with patch(
+        "app.services.message_pipeline.tavily_search",
+        new=AsyncMock(return_value=[{"title": "Web", "url": "http://x", "content": "data"}]),
+    ) as mock_tavily:
+        result = await pipeline.handle(
+            {
+                "group_id": "group_customer_demo",
+                "sender_id": "u1",
+                "sender_gender": "male",
+                "text": "Quy trình chiếu xạ thực phẩm?",
+            }
+        )
+
+    assert result is not None
+    mock_tavily.assert_awaited_once()
+    system_arg = router.llm.chat.await_args.kwargs.get("system") or router.llm.chat.await_args.args[1]
+    assert "tham khảo" in system_arg.lower() or "⚠️" in system_arg
+

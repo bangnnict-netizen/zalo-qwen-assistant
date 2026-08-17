@@ -16,7 +16,9 @@ DEFAULT_DB_PATH = PROJECT_ROOT / "rag.db"
 
 GROUP_FILES = {
     "internal": "kb_internal.md",
-    "customer": "kb_customer.md",
+}
+GROUP_DIRS = {
+    "customer": "customer",
 }
 
 HEADING_SPLIT_RE = re.compile(r"(?=^##\s+)", re.MULTILINE)
@@ -55,7 +57,7 @@ class RAGService:
         top_k: int = 3,
     ) -> list[dict[str, str]]:
         """Return relevant chunks for the given group_type."""
-        if group_type not in GROUP_FILES:
+        if group_type not in GROUP_FILES and group_type not in GROUP_DIRS:
             raise ValueError(f"Unsupported group_type: {group_type}")
 
         self.ensure_index()
@@ -120,6 +122,16 @@ class RAGService:
         )
         conn.commit()
 
+    def _iter_group_dir_files(self, group_type: str, dir_name: str) -> list[Path]:
+        dir_path = self.kb_dir / dir_name
+        if not dir_path.is_dir():
+            logger.warning("KB directory missing: %s", dir_path)
+            return []
+        files = sorted(dir_path.glob("*.md"))
+        if not files:
+            logger.warning("KB directory empty: %s", dir_path)
+        return files
+
     def _kb_fingerprint(self) -> str:
         hasher = hashlib.sha256()
         for group_type, filename in sorted(GROUP_FILES.items()):
@@ -132,6 +144,16 @@ class RAGService:
                 f"{group_type}:{filename}:{stat.st_mtime_ns}:{stat.st_size}\n".encode()
             )
             hasher.update(path.read_bytes())
+
+        for group_type, dir_name in sorted(GROUP_DIRS.items()):
+            for path in self._iter_group_dir_files(group_type, dir_name):
+                filename = path.name
+                stat = path.stat()
+                hasher.update(
+                    f"{group_type}:{filename}:{stat.st_mtime_ns}:{stat.st_size}\n".encode()
+                )
+                hasher.update(path.read_bytes())
+
         return hasher.hexdigest()
 
     def _rebuild(self, conn: sqlite3.Connection, fingerprint: str) -> None:
@@ -149,6 +171,19 @@ class RAGService:
                     """,
                     (group_type, chunk["heading"], chunk["content"], filename),
                 )
+
+        for group_type, dir_name in GROUP_DIRS.items():
+            for path in self._iter_group_dir_files(group_type, dir_name):
+                filename = path.name
+                for chunk in _split_markdown_sections(path.read_text(encoding="utf-8")):
+                    conn.execute(
+                        """
+                        INSERT INTO chunks (group_type, heading, content, source_file)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (group_type, chunk["heading"], chunk["content"], filename),
+                    )
+
         conn.execute(
             """
             INSERT INTO meta(key, value) VALUES('fingerprint', ?)

@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     enable_zalo_real: bool = True
     airtable_api_key: str = ""
     airtable_base_id: str = ""
+    tavily_api_key: str = ""
+    xkiro_api_key: str = ""
     allowed_internal_group_ids: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["group_internal_demo"]
     )

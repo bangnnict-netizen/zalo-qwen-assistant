@@ -9,7 +9,7 @@ import httpx
 import pytest
 
 from app.config import Settings
-from app.services.llm_service import BUSY_REPLY, GROQ_CHAT_URL, LLMService
+from app.services.llm_service import BUSY_REPLY, GROQ_CHAT_URL, LLMService, XKIRO_CHAT_URL, XKIRO_MODEL
 
 PRIMARY = "primary-model"
 FALLBACK = "fallback-model"
@@ -20,6 +20,7 @@ def _settings() -> Settings:
         groq_api_key="test-key-not-real",
         llm_primary_model=PRIMARY,
         llm_fallback_model=FALLBACK,
+        xkiro_api_key="",
     )
 
 
@@ -106,6 +107,47 @@ def test_both_models_fail_returns_busy_message() -> None:
 
     assert result == {"answer": BUSY_REPLY, "model_used": "none"}
     assert _posted_models(client) == [PRIMARY, FALLBACK]
+
+
+def test_both_groq_fail_xkiro_success() -> None:
+    xkiro_request = httpx.Request("POST", XKIRO_CHAT_URL)
+    xkiro_ok = httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "trả lời từ xKiro"}}]},
+        request=xkiro_request,
+    )
+    cm, client = _patch_client(
+        [_status_response(429), _status_response(500), xkiro_ok],
+    )
+    settings = Settings(
+        groq_api_key="test-key-not-real",
+        llm_primary_model=PRIMARY,
+        llm_fallback_model=FALLBACK,
+        xkiro_api_key="xkiro-key",
+    )
+    service = LLMService(settings)
+
+    with patch("app.services.llm_service.httpx.AsyncClient", return_value=cm):
+        result = _run(service.chat("Câu hỏi?"))
+
+    assert result == {"answer": "trả lời từ xKiro", "model_used": XKIRO_MODEL}
+    posted = client.post.await_args_list
+    assert posted[-1].kwargs["json"]["model"] == XKIRO_MODEL
+    assert posted[-1].args[0] == XKIRO_CHAT_URL or posted[-1].kwargs.get("url") is None
+    assert posted[-1].kwargs["json"]["model"] == XKIRO_MODEL
+
+
+def test_both_groq_fail_no_xkiro_key_returns_busy() -> None:
+    cm, client = _patch_client(
+        [_status_response(429), _status_response(500)],
+    )
+    service = LLMService(_settings())
+
+    with patch("app.services.llm_service.httpx.AsyncClient", return_value=cm):
+        result = _run(service.chat("Câu hỏi?"))
+
+    assert result == {"answer": BUSY_REPLY, "model_used": "none"}
+    assert len(client.post.await_args_list) == 2
 
 
 def test_system_prompt_included_when_provided() -> None:

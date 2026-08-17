@@ -17,7 +17,9 @@ def _write_kb(kb_dir: Path) -> None:
         "Mọi người vào khu vực chiếu xạ phải đeo dosimeter.\n",
         encoding="utf-8",
     )
-    (kb_dir / "kb_customer.md").write_text(
+    customer_dir = kb_dir / "customer"
+    customer_dir.mkdir(parents=True, exist_ok=True)
+    (customer_dir / "kb_customer.md").write_text(
         "# Khách hàng\n"
         "## Thời gian xử lý\n"
         "Thông thường 24 đến 48 giờ kể từ khi nhận hàng.\n"
@@ -76,5 +78,36 @@ def test_rebuilds_when_kb_file_changes(tmp_path: Path) -> None:
     assert updated
     assert any("22h00" in hit["content"] for hit in updated)
     assert not any("dosimeter" in hit["content"] for hit in updated)
+
+    rag.close()
+
+
+def test_customer_folder_indexes_multiple_files_with_correct_source(tmp_path: Path) -> None:
+    """Regression: customer group must read every *.md file in knowledge_base/customer/,
+    not just a single fixed filename, and tag each chunk with its own source_file."""
+    kb_dir = tmp_path / "knowledge_base"
+    db_path = tmp_path / "rag.db"
+    _write_kb(kb_dir)
+
+    customer_dir = kb_dir / "customer"
+    (customer_dir / "lieu_chieu_xa.md").write_text(
+        "# Liều chiếu xạ\n"
+        "## Liều thủy sản đông lạnh\n"
+        "Liều chiếu xạ thủy sản đông lạnh thường từ 1.0 đến 5.0 kGy.\n",
+        encoding="utf-8",
+    )
+
+    rag = RAGService(kb_dir=kb_dir, db_path=db_path)
+    rag.ensure_index()
+
+    dose_hits = rag.search("customer", "liều chiếu xạ thủy sản đông lạnh", top_k=3)
+    assert dose_hits
+    assert any(hit["source_file"] == "lieu_chieu_xa.md" for hit in dose_hits)
+    assert any("kGy" in hit["content"] for hit in dose_hits)
+
+    # Original file in the same folder must still be searchable too.
+    service_hits = rag.search("customer", "dịch vụ chiếu xạ khử trùng", top_k=3)
+    assert service_hits
+    assert any(hit["source_file"] == "kb_customer.md" for hit in service_hits)
 
     rag.close()
